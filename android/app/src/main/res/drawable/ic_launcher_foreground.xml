@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Tooth shape - white on teal background -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="
+            M 43,28
+            C 43,24 47,20 54,20
+            C 61,20 65,24 65,28
+            C 65,36 63,50 62,55
+            C 61.5,57.5 60,59 58,60
+            C 56.5,60.8 55.5,62 55,65
+            C 54.8,66 54.5,67.5 54,69
+            C 53.5,67.5 53.2,66 53,65
+            C 52.5,62 51.5,60.8 50,60
+            C 48,59 46.5,57.5 46,55
+            C 45,50 43,36 43,28
+            Z" />
+
+    <!-- Tooth shine highlight -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.25"
+        android:pathData="
+            M 47,28
+            C 47,25.5 49.5,23 54,23
+            C 58.5,23 61,25.5 61,28
+            C 61,34 59.5,44 59,48
+            C 58.7,49.5 58,51 56.5,51.5
+            C 55.5,51.8 55,53 54.5,55
+            C 54.3,53 54,51.8 53,51.5
+            C 51.5,51 50.3,49.5 50,48
+            C 49,44 47,34 47,28
+            Z" />
+</vector>

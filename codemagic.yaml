@@ -12,6 +12,22 @@ workflows:
     scripts:
       - name: Set up code signing
         script: |
+          # Revoke existing distribution certificates that don't match our key
+          app-store-connect certificates list \
+            --type IOS_DISTRIBUTION DISTRIBUTION \
+            --save 2>/dev/null || true
+
+          # Get IDs and revoke them so we can create fresh ones
+          CERT_IDS=$(app-store-connect certificates list \
+            --type IOS_DISTRIBUTION DISTRIBUTION 2>/dev/null \
+            | grep -oP '[A-Z0-9]{10,}' | head -5)
+
+          for CID in $CERT_IDS; do
+            echo "Revoking certificate: $CID"
+            app-store-connect certificates delete "$CID" 2>/dev/null || true
+          done
+
+          # Now create fresh signing files
           app-store-connect fetch-signing-files "com.kilto.kilto" \
             --type IOS_APP_STORE \
             --create

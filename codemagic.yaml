@@ -20,7 +20,7 @@ workflows:
           xcode-project use-profiles
       - name: Get Flutter packages
         script: |
-          flutter packages pub get
+          flutter pub get
       - name: Install CocoaPods
         script: |
           cd ios && pod install --repo-update

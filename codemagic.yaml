@@ -12,7 +12,7 @@ workflows:
     scripts:
       - name: Set up code signing
         script: |
-          app-store-connect fetch-signing-files "com.kilto.kilto" \
+          app-store-connect fetch-signing-files "com.kilto.app" \
             --type IOS_APP_STORE \
             --create
       - name: Set up code signing settings on Xcode project

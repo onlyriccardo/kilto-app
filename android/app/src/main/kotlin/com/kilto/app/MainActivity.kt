@@ -1,4 +1,4 @@
-package com.kilto.kilto
+package com.kilto.app
 
 import io.flutter.embedding.android.FlutterActivity
 

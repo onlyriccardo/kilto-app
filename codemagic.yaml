@@ -15,6 +15,12 @@ workflows:
           app-store-connect fetch-signing-files "com.kilto.app" \
             --type IOS_APP_STORE \
             --create
+      - name: Set up keychain
+        script: |
+          keychain initialize
+      - name: Import certificates to keychain
+        script: |
+          keychain add-certificates
       - name: Set up code signing settings on Xcode project
         script: |
           xcode-project use-profiles

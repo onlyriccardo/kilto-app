@@ -1,29 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../config/theme.dart';
-import '../../../../config/demo_data.dart';
+import '../../../../core/api/v1/clinic_providers.dart';
 import '../../subscreens/clinic_chat_detail_screen.dart';
 
-class ClinicMessagesScreen extends StatefulWidget {
+/// Conversations list for clinic staff. Fetched from /v1/clinic/conversations.
+/// Backend returns { id, contact_id, name, initials, last_message,
+/// time_label, unread_count }.
+class ClinicMessagesScreen extends ConsumerStatefulWidget {
   const ClinicMessagesScreen({super.key});
 
   @override
-  State<ClinicMessagesScreen> createState() => _ClinicMessagesScreenState();
+  ConsumerState<ClinicMessagesScreen> createState() =>
+      _ClinicMessagesScreenState();
 }
 
-class _ClinicMessagesScreenState extends State<ClinicMessagesScreen> {
+class _ClinicMessagesScreenState extends ConsumerState<ClinicMessagesScreen> {
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
-
-  List<Map<String, dynamic>> get _filteredConversations {
-    if (_searchQuery.isEmpty) return DemoData.conversations;
-
-    return DemoData.conversations.where((conv) {
-      final patientIdx = conv['patientIdx'] as int;
-      final patient = DemoData.patients[patientIdx];
-      final name = (patient['name'] as String).toLowerCase();
-      return name.contains(_searchQuery.toLowerCase());
-    }).toList();
-  }
 
   @override
   void dispose() {
@@ -33,7 +27,7 @@ class _ClinicMessagesScreenState extends State<ClinicMessagesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final conversations = _filteredConversations;
+    final async = ref.watch(clinicConversationsProvider);
 
     return Scaffold(
       backgroundColor: KiltoColors.grey,
@@ -46,153 +40,213 @@ class _ClinicMessagesScreenState extends State<ClinicMessagesScreen> {
               child: Text(
                 'Mensajes',
                 style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w800,
-                  color: KiltoColors.navy,
-                ),
+                    fontSize: 24,
+                    fontWeight: FontWeight.w800,
+                    color: KiltoColors.navy),
               ),
             ),
             const SizedBox(height: 16),
-            // Search
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: TextField(
                 controller: _searchController,
-                onChanged: (val) => setState(() => _searchQuery = val),
+                onChanged: (v) => setState(() => _searchQuery = v),
                 decoration: InputDecoration(
-                  hintText: 'Buscar conversaci\u00f3n...',
-                  hintStyle: const TextStyle(color: KiltoColors.greyText, fontSize: 14),
-                  prefixIcon: const Icon(Icons.search, color: KiltoColors.greyText),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  filled: true,
-                  fillColor: KiltoColors.white,
+                  hintText: 'Buscar conversación...',
+                  prefixIcon:
+                      const Icon(Icons.search, color: KiltoColors.greyText),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: KiltoColors.greyMid),
+                    borderSide: BorderSide(color: KiltoColors.greyMid),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: KiltoColors.greyMid),
+                    borderSide: BorderSide(color: KiltoColors.greyMid),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: KiltoColors.teal, width: 2),
+                    borderSide: BorderSide(
+                        color: Theme.of(context).colorScheme.primary,
+                        width: 2),
                   ),
+                  filled: true,
+                  fillColor: KiltoColors.white,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 0),
                 ),
               ),
             ),
-            const SizedBox(height: 12),
-            // Conversation list
+            const SizedBox(height: 16),
             Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                itemCount: conversations.length,
-                itemBuilder: (context, index) {
-                  final conv = conversations[index];
-                  final patientIdx = conv['patientIdx'] as int;
-                  final patient = DemoData.patients[patientIdx];
-                  final unread = conv['unread'] as int;
-                  final hasUnread = unread > 0;
-
-                  return GestureDetector(
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => ClinicChatDetailScreen(patient: patient),
-                        ),
-                      );
-                    },
-                    child: Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: hasUnread ? KiltoColors.tealLight.withOpacity(0.3) : KiltoColors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: KiltoColors.greyMid),
-                      ),
-                      child: Row(
-                        children: [
-                          Stack(
-                            children: [
-                              CircleAvatar(
-                                radius: 24,
-                                backgroundColor: KiltoColors.navy,
-                                child: Text(
-                                  patient['initials'] as String,
-                                  style: const TextStyle(
-                                    color: KiltoColors.white,
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 14,
+              child: async.when(
+                loading: () =>
+                    const Center(child: CircularProgressIndicator()),
+                error: (err, _) => Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.error_outline,
+                            color: KiltoColors.red, size: 36),
+                        const SizedBox(height: 8),
+                        Text('No se pudo cargar mensajes\n$err',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                                color: KiltoColors.greyText)),
+                      ],
+                    ),
+                  ),
+                ),
+                data: (all) {
+                  final list = _searchQuery.isEmpty
+                      ? all
+                      : all
+                          .where((c) => (c['name'] as String? ?? '')
+                              .toLowerCase()
+                              .contains(_searchQuery.toLowerCase()))
+                          .toList();
+                  return RefreshIndicator(
+                    onRefresh: () async =>
+                        ref.invalidate(clinicConversationsProvider),
+                    child: list.isEmpty
+                        ? ListView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            children: const [
+                              SizedBox(height: 80),
+                              Center(
+                                child: Padding(
+                                  padding: EdgeInsets.all(24),
+                                  child: Text(
+                                    'No hay conversaciones.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                        color: KiltoColors.greyText),
                                   ),
                                 ),
                               ),
-                              if (hasUnread)
-                                Positioned(
-                                  right: 0,
-                                  top: 0,
-                                  child: Container(
-                                    width: 20,
-                                    height: 20,
-                                    decoration: const BoxDecoration(
-                                      color: KiltoColors.teal,
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: Center(
-                                      child: Text(
-                                        '$unread',
-                                        style: const TextStyle(
-                                          color: KiltoColors.white,
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
                             ],
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            itemCount: list.length,
+                            itemBuilder: (context, i) =>
+                                _buildConversationCard(list[i]),
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  patient['name'] as String,
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: hasUnread ? FontWeight.w700 : FontWeight.w600,
-                                    color: KiltoColors.navy,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  conv['lastMsg'] as String,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: hasUnread ? KiltoColors.navy : KiltoColors.greyText,
-                                    fontWeight: hasUnread ? FontWeight.w500 : FontWeight.w400,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            conv['time'] as String,
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: hasUnread ? KiltoColors.teal : KiltoColors.greyText,
-                              fontWeight: hasUnread ? FontWeight.w600 : FontWeight.w400,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
                   );
                 },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildConversationCard(Map<String, dynamic> conv) {
+    final unread = (conv['unread_count'] as int?) ?? 0;
+    final hasUnread = unread > 0;
+    final accent = Theme.of(context).colorScheme.primary;
+    final onAccent = Theme.of(context).colorScheme.onPrimary;
+    final accentLight = Color.alphaBlend(accent.withOpacity(0.12), Colors.white);
+
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ClinicChatDetailScreen(
+              conversationId: conv['id'] as int,
+              patient: {
+                'name': conv['name'] ?? '',
+                'initials': conv['initials'] ?? '??',
+                'phone': '',
+                'avatar': conv['avatar'],
+              },
+            ),
+          ),
+        ).then((_) => ref.invalidate(clinicConversationsProvider));
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: hasUnread ? accentLight : KiltoColors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: KiltoColors.greyMid),
+        ),
+        child: Row(
+          children: [
+            Stack(
+              children: [
+                CircleAvatar(
+                  radius: 24,
+                  backgroundColor: accent,
+                  child: Text(
+                    conv['initials'] as String? ?? '??',
+                    style: TextStyle(
+                        color: onAccent,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14),
+                  ),
+                ),
+                if (hasUnread)
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    child: Container(
+                      width: 20,
+                      height: 20,
+                      decoration:
+                          BoxDecoration(color: accent, shape: BoxShape.circle),
+                      child: Center(
+                        child: Text(
+                          '$unread',
+                          style: TextStyle(
+                              color: onAccent,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    conv['name'] as String? ?? '',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: hasUnread ? FontWeight.w700 : FontWeight.w600,
+                      color: KiltoColors.navy,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    conv['last_message'] as String? ?? '',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color:
+                          hasUnread ? KiltoColors.navy : KiltoColors.greyText,
+                      fontWeight:
+                          hasUnread ? FontWeight.w500 : FontWeight.w400,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              conv['time_label'] as String? ?? '',
+              style: TextStyle(
+                fontSize: 11,
+                color: hasUnread ? accent : KiltoColors.greyText,
+                fontWeight: hasUnread ? FontWeight.w600 : FontWeight.w400,
               ),
             ),
           ],

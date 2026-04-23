@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../config/theme.dart';
 import '../../../../config/demo_mode.dart';
+import '../../../../config/feature_flags.dart';
+import '../../../../core/auth/auth_providers.dart';
 import '../../subscreens/campaigns_screen.dart';
 import '../../subscreens/finances_screen.dart';
 import '../../subscreens/clinic_notifications_screen.dart';
@@ -9,11 +12,11 @@ import '../../subscreens/team_screen.dart';
 import '../../subscreens/services_screen.dart';
 import '../../subscreens/settings_screen.dart';
 
-class ClinicMoreScreen extends StatelessWidget {
+class ClinicMoreScreen extends ConsumerWidget {
   const ClinicMoreScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final menuItems = [
       _MenuItem(
         emoji: '\u{1F4E2}',
@@ -133,8 +136,8 @@ class ClinicMoreScreen extends StatelessWidget {
                       icon: const Icon(Icons.swap_horiz_rounded, size: 18),
                       label: const Text('Cambiar a vista Cliente'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: KiltoColors.teal,
-                        foregroundColor: KiltoColors.white,
+                        backgroundColor: Theme.of(context).colorScheme.primary,
+                        foregroundColor: Theme.of(context).colorScheme.onPrimary,
                         elevation: 0,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -142,6 +145,47 @@ class ClinicMoreScreen extends StatelessWidget {
                     ),
                   ),
                 ),
+              // Switch clinic + logout (only in real central-auth mode).
+              if (kCentralAuth && !kDemoMode) ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      await ref.read(tenantSessionProvider.notifier).leave();
+                      if (context.mounted) context.go('/clinics');
+                    },
+                    icon: const Icon(Icons.swap_horiz_rounded, size: 18),
+                    label: const Text('Cambiar de clínica'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: KiltoColors.navy,
+                      side: const BorderSide(color: KiltoColors.greyMid),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () =>
+                        ref.read(accountProvider.notifier).logout(),
+                    icon: const Icon(Icons.logout, size: 18),
+                    label: const Text('Cerrar sesión de Kilto'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: KiltoColors.redLight,
+                      foregroundColor: KiltoColors.red,
+                      iconColor: KiltoColors.red,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
               // Footer
               Center(
                 child: Text(

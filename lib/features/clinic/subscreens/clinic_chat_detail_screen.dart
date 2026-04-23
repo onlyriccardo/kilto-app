@@ -1,26 +1,32 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../config/clinic_theme.dart';
 import '../../../config/theme.dart';
+import '../../../core/api/v1/clinic_providers.dart';
 
-class ClinicChatDetailScreen extends StatefulWidget {
+/// Chat detail for a single conversation. When [conversationId] is passed,
+/// messages are fetched from /v1/clinic/conversations/{id}/messages and sent
+/// through POST on the same endpoint. The [patient] map is used only for
+/// the AppBar header so callers don't need to fetch it separately.
+class ClinicChatDetailScreen extends ConsumerStatefulWidget {
+  final int? conversationId;
   final Map<String, dynamic> patient;
 
-  const ClinicChatDetailScreen({super.key, required this.patient});
+  const ClinicChatDetailScreen({
+    super.key,
+    this.conversationId,
+    required this.patient,
+  });
 
   @override
-  State<ClinicChatDetailScreen> createState() => _ClinicChatDetailScreenState();
+  ConsumerState<ClinicChatDetailScreen> createState() =>
+      _ClinicChatDetailScreenState();
 }
 
-class _ClinicChatDetailScreenState extends State<ClinicChatDetailScreen> {
+class _ClinicChatDetailScreenState
+    extends ConsumerState<ClinicChatDetailScreen> {
   final TextEditingController _messageController = TextEditingController();
-  final List<Map<String, dynamic>> _messages = [
-    {'from': 'patient', 'text': 'Buenos d\u00edas doctor, ten\u00eda una consulta', 'time': '09:00'},
-    {'from': 'clinic', 'text': '\u00a1Hola! Claro, \u00bfen qu\u00e9 puedo ayudarte?', 'time': '09:02'},
-    {'from': 'patient', 'text': '\u00bfPuedo reagendar mi cita de ma\u00f1ana?', 'time': '09:05'},
-    {'from': 'clinic', 'text': 'Por supuesto. \u00bfQu\u00e9 d\u00eda te queda mejor?', 'time': '09:06'},
-    {'from': 'patient', 'text': '\u00bfTienen disponibilidad el jueves por la tarde?', 'time': '09:08'},
-    {'from': 'clinic', 'text': 'S\u00ed, tenemos horario a las 14:00 y 15:30 el jueves. \u00bfCu\u00e1l prefieres?', 'time': '09:10'},
-    {'from': 'patient', 'text': 'El de las 14:00 estar\u00eda perfecto', 'time': '09:12'},
-  ];
+  bool _sending = false;
 
   @override
   void dispose() {
@@ -28,22 +34,35 @@ class _ClinicChatDetailScreenState extends State<ClinicChatDetailScreen> {
     super.dispose();
   }
 
-  void _sendMessage() {
+  Future<void> _sendMessage() async {
     final text = _messageController.text.trim();
-    if (text.isEmpty) return;
-    setState(() {
-      _messages.add({
-        'from': 'clinic',
-        'text': text,
-        'time': TimeOfDay.now().format(context),
-      });
+    if (text.isEmpty || _sending) return;
+    final convId = widget.conversationId;
+    if (convId == null) return;
+
+    setState(() => _sending = true);
+    try {
+      await ref.read(clinicMessagingServiceProvider).send(convId, text);
       _messageController.clear();
-    });
+      ref.invalidate(clinicConversationMessagesProvider(convId));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo enviar: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      ClinicAccentTheme(child: _buildContent(context));
+
+  Widget _buildContent(BuildContext context) {
     final patient = widget.patient;
+    final convId = widget.conversationId;
 
     return Scaffold(
       backgroundColor: KiltoColors.grey,
@@ -53,14 +72,13 @@ class _ClinicChatDetailScreenState extends State<ClinicChatDetailScreen> {
           children: [
             CircleAvatar(
               radius: 18,
-              backgroundColor: KiltoColors.navy,
+              backgroundColor: Theme.of(context).colorScheme.primary,
               child: Text(
-                patient['initials'] as String,
-                style: const TextStyle(
-                  color: KiltoColors.white,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 11,
-                ),
+                patient['initials'] as String? ?? '??',
+                style: TextStyle(
+                    color: Theme.of(context).colorScheme.onPrimary,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 11),
               ),
             ),
             const SizedBox(width: 10),
@@ -68,92 +86,34 @@ class _ClinicChatDetailScreenState extends State<ClinicChatDetailScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  patient['name'] as String,
+                  patient['name'] as String? ?? '',
                   style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: KiltoColors.navy,
-                  ),
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: KiltoColors.navy),
                 ),
                 Text(
-                  patient['phone'] as String,
+                  patient['phone'] as String? ?? '',
                   style: const TextStyle(
-                    fontSize: 11,
-                    color: KiltoColors.greyText,
-                  ),
+                      fontSize: 11, color: KiltoColors.greyText),
                 ),
               ],
             ),
           ],
         ),
-        actions: [
-          IconButton(
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Llamando a ${patient['name']}...'),
-                  duration: const Duration(seconds: 2),
-                ),
-              );
-            },
-            icon: const Icon(Icons.phone_outlined, size: 22),
-          ),
-        ],
       ),
       body: Column(
         children: [
-          // Messages
           Expanded(
-            child: ListView(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              children: [
-                // Date pill
-                Center(
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 16),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: KiltoColors.greyMid,
-                      borderRadius: BorderRadius.circular(12),
+            child: convId == null
+                ? const Center(
+                    child: Text(
+                      'Selecciona una conversación.',
+                      style: TextStyle(color: KiltoColors.greyText),
                     ),
-                    child: const Text(
-                      'Hoy',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: KiltoColors.greyText,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ),
-                ..._messages.map((msg) {
-                  final isClinic = msg['from'] == 'clinic';
-                  return _buildBubble(
-                    text: msg['text'] as String,
-                    time: msg['time'] as String,
-                    isClinic: isClinic,
-                  );
-                }),
-              ],
-            ),
+                  )
+                : _buildMessages(convId),
           ),
-          // Quick replies
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  _quickChip('\u{1F4C5} Agendar cita', '\u00a1Claro! \u00bfQu\u00e9 d\u00eda y horario te conviene? Tenemos disponibilidad esta semana.'),
-                  const SizedBox(width: 8),
-                  _quickChip('\u2705 Confirmar', '\u00a1Perfecto! Tu cita est\u00e1 confirmada. Te enviaremos un recordatorio.'),
-                  const SizedBox(width: 8),
-                  _quickChip('\u{1F4CB} Ver historial', 'Tu \u00faltimo tratamiento fue el 28 Mar 2026 \u2014 Ortodoncia Ajuste con Dra. Guti\u00e9rrez.'),
-                ],
-              ),
-            ),
-          ),
-          // Input
           Container(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
             decoration: const BoxDecoration(
@@ -167,18 +127,15 @@ class _ClinicChatDetailScreenState extends State<ClinicChatDetailScreen> {
                   Expanded(
                     child: TextField(
                       controller: _messageController,
+                      enabled: convId != null && !_sending,
                       decoration: InputDecoration(
                         hintText: 'Escribe un mensaje...',
                         hintStyle: const TextStyle(
-                          color: KiltoColors.greyText,
-                          fontSize: 14,
-                        ),
+                            color: KiltoColors.greyText, fontSize: 14),
                         filled: true,
                         fillColor: KiltoColors.grey,
                         contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 10,
-                        ),
+                            horizontal: 16, vertical: 10),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(24),
                           borderSide: BorderSide.none,
@@ -193,15 +150,24 @@ class _ClinicChatDetailScreenState extends State<ClinicChatDetailScreen> {
                     child: Container(
                       width: 44,
                       height: 44,
-                      decoration: const BoxDecoration(
-                        color: KiltoColors.teal,
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primary,
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(
-                        Icons.send,
-                        color: KiltoColors.white,
-                        size: 20,
-                      ),
+                      child: _sending
+                          ? const Padding(
+                              padding: EdgeInsets.all(12),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                    Colors.white),
+                              ),
+                            )
+                          : Icon(
+                              Icons.send,
+                              color: Theme.of(context).colorScheme.onPrimary,
+                              size: 20,
+                            ),
                     ),
                   ),
                 ],
@@ -210,6 +176,67 @@ class _ClinicChatDetailScreenState extends State<ClinicChatDetailScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildMessages(int convId) {
+    final async = ref.watch(clinicConversationMessagesProvider(convId));
+    return async.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (err, _) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text('No se pudieron cargar los mensajes\n$err',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: KiltoColors.greyText)),
+        ),
+      ),
+      data: (d) {
+        final messages = ((d['messages'] as List?) ?? [])
+            .map((e) => (e as Map).cast<String, dynamic>())
+            .toList();
+        return ListView(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          children: [
+            Center(
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                decoration: BoxDecoration(
+                  color: KiltoColors.greyMid,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Text(
+                  'Hoy',
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: KiltoColors.greyText,
+                      fontWeight: FontWeight.w500),
+                ),
+              ),
+            ),
+            if (messages.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(
+                  child: Text(
+                    'Aún no hay mensajes en esta conversación.',
+                    style: TextStyle(color: KiltoColors.greyText),
+                  ),
+                ),
+              )
+            else
+              ...messages.map((msg) {
+                return _buildBubble(
+                  text: msg['content'] as String? ?? '',
+                  time: msg['time_label'] as String? ?? '',
+                  isClinic: msg['from_clinic'] == true,
+                );
+              }),
+          ],
+        );
+      },
     );
   }
 
@@ -227,7 +254,9 @@ class _ClinicChatDetailScreenState extends State<ClinicChatDetailScreen> {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
-          color: isClinic ? KiltoColors.teal : KiltoColors.white,
+          color: isClinic
+              ? Theme.of(context).colorScheme.primary
+              : KiltoColors.white,
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(16),
             topRight: const Radius.circular(16),
@@ -244,7 +273,9 @@ class _ClinicChatDetailScreenState extends State<ClinicChatDetailScreen> {
               text,
               style: TextStyle(
                 fontSize: 14,
-                color: isClinic ? KiltoColors.white : KiltoColors.navy,
+                color: isClinic
+                    ? Theme.of(context).colorScheme.onPrimary
+                    : KiltoColors.navy,
               ),
             ),
             const SizedBox(height: 4),
@@ -253,41 +284,11 @@ class _ClinicChatDetailScreenState extends State<ClinicChatDetailScreen> {
               style: TextStyle(
                 fontSize: 10,
                 color: isClinic
-                    ? KiltoColors.white.withOpacity(0.7)
+                    ? Theme.of(context).colorScheme.onPrimary.withOpacity(0.7)
                     : KiltoColors.greyText,
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _quickChip(String label, String replyText) {
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          _messages.add({
-            'from': 'clinic',
-            'text': replyText,
-            'time': TimeOfDay.now().format(context),
-          });
-        });
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: KiltoColors.white,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: KiltoColors.greyMid),
-        ),
-        child: Text(
-          label,
-          style: const TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-            color: KiltoColors.navy,
-          ),
         ),
       ),
     );

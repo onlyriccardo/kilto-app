@@ -1,23 +1,30 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../config/clinic_theme.dart';
 import '../../../config/theme.dart';
-import '../../../config/demo_data.dart';
+import '../../../core/api/v1/clinic_providers.dart';
 import 'clinic_chat_detail_screen.dart';
 
-class PatientDetailScreen extends StatefulWidget {
-  final Map<String, dynamic> patient;
+/// Patient detail — fetched from /v1/clinic/patients/{id}. Previously
+/// accepted a full patient Map; now takes only the id and hydrates via
+/// the clinicPatientDetailProvider family.
+class PatientDetailScreen extends ConsumerStatefulWidget {
+  final int patientId;
 
-  const PatientDetailScreen({super.key, required this.patient});
+  const PatientDetailScreen({super.key, required this.patientId});
 
   @override
-  State<PatientDetailScreen> createState() => _PatientDetailScreenState();
+  ConsumerState<PatientDetailScreen> createState() => _PatientDetailScreenState();
 }
 
-class _PatientDetailScreenState extends State<PatientDetailScreen>
+class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   int? _selectedTooth;
 
-  Map<String, dynamic> get patient => widget.patient;
+  // Holds the last-loaded patient payload; kept as a field so helper methods
+  // can still read it without threading it through every call.
+  Map<String, dynamic> patient = const {};
 
   @override
   void initState() {
@@ -33,7 +40,49 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
 
   @override
   Widget build(BuildContext context) {
-    final status = patient['status'] as String;
+    final async = ref.watch(clinicPatientDetailProvider(widget.patientId));
+    return ClinicAccentTheme(
+      child: async.when(
+        loading: () => const Scaffold(
+          backgroundColor: KiltoColors.grey,
+          body: Center(child: CircularProgressIndicator()),
+        ),
+        error: (err, _) => Scaffold(
+          backgroundColor: KiltoColors.grey,
+          appBar: AppBar(title: const Text('Paciente')),
+          body: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.error_outline,
+                      size: 48, color: KiltoColors.red),
+                  const SizedBox(height: 12),
+                  Text('No se pudo cargar el paciente\n$err',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: KiltoColors.greyText)),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () => ref.invalidate(
+                        clinicPatientDetailProvider(widget.patientId)),
+                    child: const Text('Reintentar'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        data: (p) {
+          patient = p;
+          return _buildContent(context);
+        },
+      ),
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
+    final status = patient['status'] as String? ?? 'active';
     String statusLabel;
     Color statusBg;
     Color statusFg;
@@ -79,130 +128,133 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
           ),
         ],
       ),
-      body: Column(
-        children: [
-          // Profile header
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(20),
-            color: KiltoColors.white,
-            child: Column(
-              children: [
-                CircleAvatar(
-                  radius: 32,
-                  backgroundColor: KiltoColors.navy,
-                  child: Text(
-                    patient['initials'] as String,
+      // Everything below the AppBar scrolls. The profile header and stat
+      // cards scroll away entirely; the TabBar sticks to the top of the
+      // scroll area (pinned) so tabs remain reachable after scrolling.
+      body: NestedScrollView(
+        headerSliverBuilder: (ctx, innerBoxIsScrolled) => [
+          SliverToBoxAdapter(
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(20),
+              color: KiltoColors.white,
+              child: Column(
+                children: [
+                  CircleAvatar(
+                    radius: 32,
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    child: Text(
+                      patient['initials'] as String,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onPrimary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 20,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    patient['name'] as String,
                     style: const TextStyle(
-                      color: KiltoColors.white,
-                      fontWeight: FontWeight.w700,
                       fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: KiltoColors.navy,
                     ),
                   ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  patient['name'] as String,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                    color: KiltoColors.navy,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  patient['phone'] as String,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: KiltoColors.greyText,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: statusBg,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    statusLabel,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: statusFg,
+                  const SizedBox(height: 4),
+                  Text(
+                    patient['phone'] as String,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: KiltoColors.greyText,
                     ),
                   ),
-                ),
-              ],
-            ),
-          ),
-          // Stat cards
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Expanded(
-                  child: _buildStatCard(
-                    'Tratamientos',
-                    '${patient['treatments']}',
-                    KiltoColors.teal,
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: statusBg,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      statusLabel,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: statusFg,
+                      ),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _buildStatCard(
-                    'Pr\u00f3xima cita',
-                    patient['nextAppt'] as String,
-                    KiltoColors.blue,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _buildStatCard(
-                    'Balance',
-                    patient['balance'] as String,
-                    (patient['balance'] as String) != '0 Bs'
-                        ? KiltoColors.red
-                        : KiltoColors.green,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // Tab bar
-          Container(
-            color: KiltoColors.white,
-            child: TabBar(
-              controller: _tabController,
-              labelColor: KiltoColors.teal,
-              unselectedLabelColor: KiltoColors.greyText,
-              indicatorColor: KiltoColors.teal,
-              indicatorWeight: 3,
-              labelStyle: const TextStyle(
-                fontWeight: FontWeight.w600,
-                fontSize: 13,
+                ],
               ),
-              tabs: const [
-                Tab(text: 'Info'),
-                Tab(text: 'Odontograma'),
-                Tab(text: 'Historial'),
-                Tab(text: 'Docs'),
-              ],
             ),
           ),
-          // Tab content
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                _buildInfoTab(),
-                _buildOdontogramTab(),
-                _buildHistorialTab(),
-                _buildDocsTab(),
-              ],
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _buildStatCard(
+                      'Tratamientos',
+                      '${patient['treatments_count'] ?? 0}',
+                      Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _buildStatCard(
+                      'Pr\u00f3xima cita',
+                      (patient['next_appointment'] as Map?)?['label'] as String? ?? '—',
+                      KiltoColors.blue,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _buildStatCard(
+                      'Balance',
+                      patient['balance'] as String? ?? '0 Bs',
+                      (patient['balance'] as String? ?? '0 Bs') != '0 Bs'
+                          ? KiltoColors.red
+                          : KiltoColors.green,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          SliverPersistentHeader(
+            pinned: true,
+            delegate: _TabBarDelegate(
+              TabBar(
+                controller: _tabController,
+                labelColor: Theme.of(context).colorScheme.primary,
+                unselectedLabelColor: KiltoColors.greyText,
+                indicatorColor: Theme.of(context).colorScheme.primary,
+                indicatorWeight: 3,
+                labelStyle: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
+                tabs: const [
+                  Tab(text: 'Info'),
+                  Tab(text: 'Odontograma'),
+                  Tab(text: 'Historial'),
+                  Tab(text: 'Docs'),
+                ],
+              ),
             ),
           ),
         ],
+        body: TabBarView(
+          controller: _tabController,
+          children: [
+            _buildInfoTab(),
+            _buildOdontogramTab(),
+            _buildHistorialTab(),
+            _buildDocsTab(),
+          ],
+        ),
       ),
     );
   }
@@ -243,8 +295,9 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
 
   // ── Info Tab ──
   Widget _buildInfoTab() {
-    final allergies = patient['allergies'] as String;
-    final hasAllergies = allergies != 'Ninguna';
+    final medical = (patient['medical'] as Map?)?.cast<String, dynamic>() ?? {};
+    final allergies = medical['allergies'] as String? ?? 'Ninguna';
+    final hasAllergies = allergies != 'Ninguna' && allergies.isNotEmpty;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -263,11 +316,11 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Row(
+                Row(
                   children: [
-                    Icon(Icons.person_outline, size: 18, color: KiltoColors.teal),
-                    SizedBox(width: 8),
-                    Text(
+                    Icon(Icons.person_outline, size: 18, color: Theme.of(context).colorScheme.primary),
+                    const SizedBox(width: 8),
+                    const Text(
                       'Datos personales',
                       style: TextStyle(
                         fontSize: 15,
@@ -278,9 +331,9 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                   ],
                 ),
                 const SizedBox(height: 14),
-                _infoRow('Email', patient['email'] as String),
-                _infoRow('Fecha nac.', patient['dob'] as String),
-                _infoRow('Tipo sangre', patient['blood'] as String),
+                _infoRow('Email', patient['email'] as String? ?? '—'),
+                _infoRow('Fecha nac.', patient['date_of_birth'] as String? ?? '—'),
+                _infoRow('Tipo sangre', medical['blood_type'] as String? ?? '—'),
                 Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: Row(
@@ -326,7 +379,12 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
             ),
           ),
           const SizedBox(height: 10),
-          ...DemoData.treatmentHistory.take(3).map((t) {
+          ..._patientTreatments().take(3).map((t) {
+            final label = (t['description'] as String?)?.trim().isNotEmpty == true
+                ? t['description'] as String
+                : (t['treatment_code'] as String? ?? 'Tratamiento');
+            final date = t['performed_at'] as String? ?? '';
+            final doctor = t['performer_name'] as String? ?? '';
             return Container(
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.all(12),
@@ -337,14 +395,15 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.check_circle_outline, size: 18, color: KiltoColors.green),
+                  const Icon(Icons.check_circle_outline,
+                      size: 18, color: KiltoColors.green),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          t['service'] as String,
+                          label,
                           style: const TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
@@ -352,8 +411,9 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                           ),
                         ),
                         Text(
-                          '${t['date']} \u2022 ${t['doctor']}',
-                          style: const TextStyle(fontSize: 11, color: KiltoColors.greyText),
+                          [date, doctor].where((s) => s.isNotEmpty).join(' • '),
+                          style: const TextStyle(
+                              fontSize: 11, color: KiltoColors.greyText),
                         ),
                       ],
                     ),
@@ -362,6 +422,12 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
               ),
             );
           }),
+          if (_patientTreatments().isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 8),
+              child: Text('Aún no hay tratamientos registrados.',
+                  style: TextStyle(fontSize: 12, color: KiltoColors.greyText)),
+            ),
           const SizedBox(height: 16),
           // Action buttons
           Row(
@@ -410,7 +476,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
       icon: Icon(icon, size: 16),
       label: Text(label),
       style: ElevatedButton.styleFrom(
-        backgroundColor: KiltoColors.teal,
+        backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: KiltoColors.white,
         elevation: 0,
         padding: const EdgeInsets.symmetric(vertical: 12),
@@ -424,8 +490,10 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
   void _showAppointmentSheet(BuildContext context) {
     String? selectedService;
     String? selectedTime;
-    final serviceNames = DemoData.services.map((s) => s['name'] as String).toList();
-    final timeSlots = DemoData.availableTimeSlots;
+    // Service + time catalog should come from /v1/clinic/services and
+    // /v1/availability; placeholder list kept until those are wired.
+    const serviceNames = ['Consulta general', 'Limpieza', 'Ortodoncia', 'Endodoncia'];
+    const timeSlots = ['09:00', '09:30', '10:00', '10:30', '11:00', '14:00', '14:30', '15:00'];
 
     showModalBottomSheet(
       context: context,
@@ -470,7 +538,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                       const SnackBar(content: Text('Cita agendada exitosamente'), backgroundColor: Color(0xFF2EC4B6)),
                     );
                   },
-                  style: ElevatedButton.styleFrom(backgroundColor: KiltoColors.teal, foregroundColor: KiltoColors.white, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                  style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.primary, foregroundColor: KiltoColors.white, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
                   child: const Text('Confirmar', style: TextStyle(fontWeight: FontWeight.w600)),
                 ),
               ),
@@ -517,7 +585,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                       const SnackBar(content: Text('Documento subido exitosamente'), backgroundColor: Color(0xFF2EC4B6)),
                     );
                   },
-                  style: ElevatedButton.styleFrom(backgroundColor: KiltoColors.teal, foregroundColor: KiltoColors.white, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                  style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.primary, foregroundColor: KiltoColors.white, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
                   child: const Text('Subir', style: TextStyle(fontWeight: FontWeight.w600)),
                 ),
               ),
@@ -567,7 +635,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                       const SnackBar(content: Text('Tratamiento guardado'), backgroundColor: Color(0xFF2EC4B6)),
                     );
                   },
-                  style: ElevatedButton.styleFrom(backgroundColor: KiltoColors.teal, foregroundColor: KiltoColors.white, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                  style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.primary, foregroundColor: KiltoColors.white, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
                   child: const Text('Guardar', style: TextStyle(fontWeight: FontWeight.w600)),
                 ),
               ),
@@ -592,7 +660,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
             Text('Foto - Diente $_selectedTooth', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF1B2A4A))),
             const SizedBox(height: 20),
             ListTile(
-              leading: const Icon(Icons.camera_alt, color: KiltoColors.teal, size: 28),
+              leading: Icon(Icons.camera_alt, color: Theme.of(context).colorScheme.primary, size: 28),
               title: const Text('Tomar foto', style: TextStyle(fontWeight: FontWeight.w600, color: KiltoColors.navy)),
               onTap: () {
                 Navigator.pop(ctx);
@@ -603,7 +671,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
             ),
             const Divider(),
             ListTile(
-              leading: const Icon(Icons.photo_library, color: KiltoColors.teal, size: 28),
+              leading: Icon(Icons.photo_library, color: Theme.of(context).colorScheme.primary, size: 28),
               title: const Text('Subir de galería', style: TextStyle(fontWeight: FontWeight.w600, color: KiltoColors.navy)),
               onTap: () {
                 Navigator.pop(ctx);
@@ -760,8 +828,36 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
     );
   }
 
+  /// Builds a tooth_number → {status, treatments[]} map from the patient
+  /// payload's treatments list. A tooth with any unresolved treatment is
+  /// "attention", any resolved is "treated", otherwise "healthy".
+  Map<int, Map<String, dynamic>> _toothStatusMap() {
+    final map = <int, Map<String, dynamic>>{};
+    for (final t in _patientTreatments()) {
+      final tn = t['tooth_number'];
+      if (tn is! int) continue;
+      final resolved = t['is_resolved'] == true;
+      final prev = map[tn];
+      final prevStatus = prev?['status'] as String?;
+      String status;
+      if (prevStatus == 'attention') {
+        status = 'attention';
+      } else if (!resolved) {
+        status = 'attention';
+      } else {
+        status = 'treated';
+      }
+      final treatments = (prev?['treatments'] as List<dynamic>?) ?? <dynamic>[];
+      map[tn] = {
+        'status': status,
+        'treatments': [...treatments, t],
+      };
+    }
+    return map;
+  }
+
   Widget _buildTooth(int fdi, bool isUpper) {
-    final data = DemoData.toothData[fdi];
+    final data = _toothStatusMap()[fdi];
     final status = data?['status'] as String? ?? 'healthy';
     final fill = _statusColors[status] ?? KiltoColors.white;
     final isExtracted = status == 'extracted';
@@ -775,7 +871,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
         child: Container(
           decoration: isSelected
               ? BoxDecoration(
-                  border: Border.all(color: KiltoColors.teal, width: 2),
+                  border: Border.all(color: Theme.of(context).colorScheme.primary, width: 2),
                   borderRadius: BorderRadius.circular(4),
                 )
               : null,
@@ -825,8 +921,8 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
 
   Widget _buildToothDetailCard() {
     final fdi = _selectedTooth!;
-    final data = DemoData.toothData[fdi];
-    final name = data?['name'] as String? ?? 'Diente $fdi';
+    final data = _toothStatusMap()[fdi];
+    final name = 'Diente $fdi';
     final status = data?['status'] as String? ?? 'healthy';
     final treatments = data?['treatments'] as List<dynamic>? ?? [];
     final statusLabel = _statusLabels[status] ?? status;
@@ -839,7 +935,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
       decoration: BoxDecoration(
         color: KiltoColors.white,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: KiltoColors.teal),
+        border: Border.all(color: Theme.of(context).colorScheme.primary),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -910,11 +1006,11 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                 padding: const EdgeInsets.only(bottom: 6),
                 child: Row(
                   children: [
-                    const Icon(Icons.circle, size: 6, color: KiltoColors.teal),
+                    Icon(Icons.circle, size: 6, color: Theme.of(context).colorScheme.primary),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        '${treatment['desc']} - ${treatment['date']}',
+                        '${(treatment['description'] as String?)?.trim().isNotEmpty == true ? treatment['description'] : (treatment['treatment_code'] ?? 'Tratamiento')} - ${treatment['performed_at'] ?? ''}',
                         style: const TextStyle(fontSize: 12, color: KiltoColors.navy),
                       ),
                     ),
@@ -941,13 +1037,39 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
     );
   }
 
+  /// Returns the treatments list from the patient payload, cast to
+  /// a list of string-keyed maps. Empty when the patient has none.
+  List<Map<String, dynamic>> _patientTreatments() {
+    final raw = patient['treatments'] as List? ?? const [];
+    return raw.map((e) => (e as Map).cast<String, dynamic>()).toList();
+  }
+
   // ── Historial Tab ──
   Widget _buildHistorialTab() {
+    final treatments = _patientTreatments();
+    if (treatments.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32),
+          child: Text(
+            'Aún no hay tratamientos en el historial de este paciente.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: KiltoColors.greyText),
+          ),
+        ),
+      );
+    }
     return ListView.builder(
       padding: const EdgeInsets.all(16),
-      itemCount: DemoData.treatmentHistory.length,
+      itemCount: treatments.length,
       itemBuilder: (context, index) {
-        final t = DemoData.treatmentHistory[index];
+        final t = treatments[index];
+        final label = (t['description'] as String?)?.trim().isNotEmpty == true
+            ? t['description'] as String
+            : (t['treatment_code'] as String? ?? 'Tratamiento');
+        final cost = t['cost'] as String? ?? '—';
+        final date = t['performed_at'] as String? ?? '';
+        final doctor = t['performer_name'] as String? ?? '';
         return Container(
           margin: const EdgeInsets.only(bottom: 10),
           padding: const EdgeInsets.all(14),
@@ -964,7 +1086,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                 children: [
                   Expanded(
                     child: Text(
-                      t['service'] as String,
+                      label,
                       style: const TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
@@ -973,11 +1095,11 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                     ),
                   ),
                   Text(
-                    t['cost'] as String,
-                    style: const TextStyle(
+                    cost,
+                    style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
-                      color: KiltoColors.teal,
+                      color: Theme.of(context).colorScheme.primary,
                     ),
                   ),
                 ],
@@ -985,29 +1107,38 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
               const SizedBox(height: 6),
               Row(
                 children: [
-                  const Icon(Icons.calendar_today, size: 12, color: KiltoColors.greyText),
+                  const Icon(Icons.calendar_today,
+                      size: 12, color: KiltoColors.greyText),
                   const SizedBox(width: 4),
                   Text(
-                    t['date'] as String,
-                    style: const TextStyle(fontSize: 12, color: KiltoColors.greyText),
+                    date,
+                    style: const TextStyle(
+                        fontSize: 12, color: KiltoColors.greyText),
                   ),
-                  const SizedBox(width: 12),
-                  const Icon(Icons.person_outline, size: 12, color: KiltoColors.greyText),
-                  const SizedBox(width: 4),
-                  Text(
-                    t['doctor'] as String,
-                    style: const TextStyle(fontSize: 12, color: KiltoColors.greyText),
-                  ),
+                  if (doctor.isNotEmpty) ...[
+                    const SizedBox(width: 12),
+                    const Icon(Icons.person_outline,
+                        size: 12, color: KiltoColors.greyText),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        doctor,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 12, color: KiltoColors.greyText),
+                      ),
+                    ),
+                  ],
                 ],
               ),
-              if (t['note'] != null) ...[
+              if (t['is_resolved'] == false) ...[
                 const SizedBox(height: 6),
                 Text(
-                  t['note'] as String,
+                  'En seguimiento',
                   style: TextStyle(
                     fontSize: 12,
-                    color: KiltoColors.navy.withOpacity(0.6),
-                    fontStyle: FontStyle.italic,
+                    color: KiltoColors.yellow,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],
@@ -1033,7 +1164,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
               icon: const Icon(Icons.upload_file, size: 18),
               label: const Text('Subir documento'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: KiltoColors.teal,
+                backgroundColor: Theme.of(context).colorScheme.primary,
                 foregroundColor: KiltoColors.white,
                 elevation: 0,
                 padding: const EdgeInsets.symmetric(vertical: 14),
@@ -1044,64 +1175,22 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
             ),
           ),
           const SizedBox(height: 16),
-          ...DemoData.documents.map((doc) {
-            return Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: KiltoColors.white,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: KiltoColors.greyMid),
+          // Documents endpoint isn't scoped per-patient on the clinic side
+          // yet, so we surface an empty-state until it ships.
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: KiltoColors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: KiltoColors.greyMid),
+            ),
+            child: const Center(
+              child: Text(
+                'Aún no hay documentos asociados a este paciente.',
+                style: TextStyle(color: KiltoColors.greyText),
               ),
-              child: Row(
-                children: [
-                  Text(
-                    doc['icon'] as String,
-                    style: const TextStyle(fontSize: 24),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          doc['title'] as String,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: KiltoColors.navy,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '${doc['date']} \u2022 ${doc['doctor']}',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: KiltoColors.greyText,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: KiltoColors.grey,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      doc['category'] as String,
-                      style: const TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w500,
-                        color: KiltoColors.greyText,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }),
+            ),
+          ),
         ],
       ),
     );
@@ -1182,4 +1271,24 @@ class _ToothPainter extends CustomPainter {
       borderColor != oldDelegate.borderColor ||
       isUpper != oldDelegate.isUpper ||
       isExtracted != oldDelegate.isExtracted;
+}
+
+/// Pins the patient-detail TabBar below the scrollable profile header.
+class _TabBarDelegate extends SliverPersistentHeaderDelegate {
+  final TabBar tabBar;
+  _TabBarDelegate(this.tabBar);
+
+  @override
+  double get minExtent => tabBar.preferredSize.height;
+  @override
+  double get maxExtent => tabBar.preferredSize.height;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    return Container(color: KiltoColors.white, child: tabBar);
+  }
+
+  @override
+  bool shouldRebuild(covariant _TabBarDelegate oldDelegate) =>
+      oldDelegate.tabBar != tabBar;
 }

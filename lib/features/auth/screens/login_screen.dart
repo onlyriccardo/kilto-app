@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
+import '../../../config/feature_flags.dart';
 import '../../../config/theme.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/auth/auth_service.dart';
 import '../../../core/auth/auth_state.dart';
+import '../../../core/auth/auth_providers.dart';
 import '../../../core/storage/secure_storage.dart';
 
+/// Legacy providers kept for the pre-Kilto-central-auth flow.
 final apiClientProvider = Provider<ApiClient>(
   (ref) => ApiClient(storage: SecureStorageService()),
 );
@@ -41,11 +45,10 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _login(WidgetRef ref) async {
-    final tenant = _tenantController.text.trim();
     final email = _emailController.text.trim();
     final password = _passwordController.text;
 
-    if (tenant.isEmpty || email.isEmpty || password.isEmpty) {
+    if (email.isEmpty || password.isEmpty) {
       _showError('Por favor completa todos los campos');
       return;
     }
@@ -53,30 +56,44 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final authService = ref.read(authServiceProvider);
-      final data = await authService.login(
-        email: email,
-        password: password,
-        tenantSlug: tenant,
-      );
+      if (kCentralAuth) {
+        await ref
+            .read(accountProvider.notifier)
+            .login(email: email, password: password);
+        if (!mounted) return;
+        context.go('/clinics');
+      } else {
+        final tenant = _tenantController.text.trim();
+        if (tenant.isEmpty) {
+          _showError('Indica el slug de tu clínica');
+          return;
+        }
 
-      final user = data['user'] as Map<String, dynamic>;
-      final tenantData = user['tenant'] as Map<String, dynamic>;
-      final modules = (tenantData['active_modules'] as List<dynamic>?)
-              ?.map((e) => e.toString())
-              .toList() ??
-          [];
+        final authService = ref.read(authServiceProvider);
+        final data = await authService.login(
+          email: email,
+          password: password,
+          tenantSlug: tenant,
+        );
 
-      ref.read(authStateProvider.notifier).login(
-            token: data['token'] as String,
-            userType: user['type'] as String,
-            userName: user['name'] as String,
-            userEmail: user['email'] as String,
-            tenantName: tenantData['name'] as String,
-            tenantSlug: tenantData['slug'] as String,
-            activeModules: modules,
-          );
-    } catch (e) {
+        final user = data['user'] as Map<String, dynamic>;
+        final tenantData = user['tenant'] as Map<String, dynamic>;
+        final modules = (tenantData['active_modules'] as List<dynamic>?)
+                ?.map((e) => e.toString())
+                .toList() ??
+            [];
+
+        ref.read(authStateProvider.notifier).login(
+              token: data['token'] as String,
+              userType: user['type'] as String,
+              userName: user['name'] as String,
+              userEmail: user['email'] as String,
+              tenantName: tenantData['name'] as String,
+              tenantSlug: tenantData['slug'] as String,
+              activeModules: modules,
+            );
+      }
+    } catch (_) {
       _showError('Credenciales incorrectas. Intenta de nuevo.');
     } finally {
       if (mounted) {
@@ -90,9 +107,11 @@ class _LoginScreenState extends State<LoginScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: KiltoColors.red,
+        backgroundColor: KiltoColors.error,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(KiltoRadii.small),
+        ),
       ),
     );
   }
@@ -102,78 +121,65 @@ class _LoginScreenState extends State<LoginScreen> {
     return Consumer(
       builder: (context, ref, _) {
         return Scaffold(
-          body: Container(
-            width: double.infinity,
-            height: double.infinity,
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0xFF0F172A), Color(0xFF1E293B)],
-              ),
-            ),
-            child: SafeArea(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 28),
+          backgroundColor: KiltoColors.bg,
+          body: SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 28),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: MediaQuery.of(context).size.height -
+                      MediaQuery.of(context).padding.vertical,
+                ),
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    const SizedBox(height: 64),
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        SvgPicture.asset(
+                          'assets/brand/kilto-wordmark-light.svg',
+                          height: 44,
+                          semanticsLabel: 'Kilto',
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Tu negocio, en un solo lugar',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: KiltoColors.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: 48),
-                    // Tooth logo placeholder
-                    Container(
-                      width: 80,
-                      height: 80,
-                      decoration: BoxDecoration(
-                        color: KiltoColors.teal.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(20),
+                    if (!kCentralAuth) ...[
+                      const _FieldLabel('Clínica'),
+                      const SizedBox(height: 6),
+                      _buildTextField(
+                        controller: _tenantController,
+                        hintText: 'slug de tu clínica',
+                        prefixIcon: Icons.business_rounded,
+                        keyboardType: TextInputType.url,
                       ),
-                      child: const Icon(
-                        Icons.medical_services,
-                        size: 44,
-                        color: KiltoColors.teal,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'kilto',
-                      style: TextStyle(
-                        fontSize: 38,
-                        fontWeight: FontWeight.w800,
-                        color: KiltoColors.white,
-                        letterSpacing: -1,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Tu negocio, en un solo lugar',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: KiltoColors.white.withOpacity(0.5),
-                      ),
-                    ),
-                    const SizedBox(height: 40),
-
-                    // Tenant slug field
-                    _buildTextField(
-                      controller: _tenantController,
-                      hintText: 'Nombre de tu clínica (slug)',
-                      prefixIcon: Icons.business_rounded,
-                      keyboardType: TextInputType.url,
-                    ),
-                    const SizedBox(height: 14),
-
-                    // Email field
+                      const SizedBox(height: 16),
+                    ],
+                    const _FieldLabel('Correo'),
+                    const SizedBox(height: 6),
                     _buildTextField(
                       controller: _emailController,
-                      hintText: 'Correo electrónico',
+                      hintText: 'correo@ejemplo.com',
                       prefixIcon: Icons.email_outlined,
                       keyboardType: TextInputType.emailAddress,
                     ),
-                    const SizedBox(height: 14),
-
-                    // Password field
+                    const SizedBox(height: 16),
+                    const _FieldLabel('Contraseña'),
+                    const SizedBox(height: 6),
                     _buildTextField(
                       controller: _passwordController,
-                      hintText: 'Contraseña',
+                      hintText: '••••••••',
                       prefixIcon: Icons.lock_outline,
                       obscureText: _obscurePassword,
                       suffixIcon: IconButton(
@@ -181,7 +187,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           _obscurePassword
                               ? Icons.visibility_off_outlined
                               : Icons.visibility_outlined,
-                          color: KiltoColors.greyText,
+                          color: KiltoColors.textTertiary,
                           size: 20,
                         ),
                         onPressed: () {
@@ -190,111 +196,63 @@ class _LoginScreenState extends State<LoginScreen> {
                         },
                       ),
                     ),
-                    const SizedBox(height: 24),
-
-                    // Login button
+                    const SizedBox(height: 28),
                     SizedBox(
-                      width: double.infinity,
                       height: 52,
                       child: ElevatedButton(
                         onPressed: _isLoading ? null : () => _login(ref),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: KiltoColors.teal,
-                          foregroundColor: KiltoColors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          disabledBackgroundColor:
-                              KiltoColors.teal.withOpacity(0.5),
-                        ),
                         child: _isLoading
                             ? const SizedBox(
                                 width: 22,
                                 height: 22,
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2.5,
-                                  color: KiltoColors.white,
+                                  color: KiltoColors.onBrand,
                                 ),
                               )
                             : const Text(
                                 'Iniciar sesión',
                                 style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
                       ),
                     ),
-                    const SizedBox(height: 16),
-
-                    // Google sign-in button
-                    SizedBox(
-                      width: double.infinity,
-                      height: 52,
-                      child: OutlinedButton.icon(
-                        onPressed: null, // Disabled — coming soon
-                        icon: const Icon(Icons.g_mobiledata, size: 24),
-                        label: const Text('Continuar con Google'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: KiltoColors.white.withOpacity(0.4),
-                          side: BorderSide(
-                            color: KiltoColors.white.withOpacity(0.15),
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          disabledForegroundColor:
-                              KiltoColors.white.withOpacity(0.35),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Coming soon...',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: KiltoColors.white.withOpacity(0.3),
-                      ),
-                    ),
-                    const SizedBox(height: 32),
-
-                    // Create account link
-                    TextButton(
-                      onPressed: () {
-                        // Registration not wired yet
-                        _showError(
-                            'Registro no disponible aún. Contacta a tu clínica.');
-                      },
-                      child: RichText(
-                        text: TextSpan(
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: KiltoColors.white.withOpacity(0.6),
-                          ),
-                          children: const [
-                            TextSpan(text: '¿No tienes cuenta? '),
-                            TextSpan(
-                              text: 'Crear cuenta',
-                              style: TextStyle(
-                                color: KiltoColors.teal,
-                                fontWeight: FontWeight.w600,
-                              ),
+                    if (kCentralAuth) ...[
+                      const SizedBox(height: 16),
+                      TextButton(
+                        onPressed: () => context.push('/register'),
+                        child: const Text.rich(
+                          TextSpan(
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: KiltoColors.textSecondary,
                             ),
-                          ],
+                            children: [
+                              TextSpan(text: '¿No tienes cuenta? '),
+                              TextSpan(
+                                text: 'Crear cuenta',
+                                style: TextStyle(
+                                  color: KiltoColors.brandPrimary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                    ),
+                    ],
                     const SizedBox(height: 40),
-
-                    // Footer
-                    Text(
-                      'Powered by kilto · v1.0',
+                    const Text(
+                      'Powered by Kilto · v1.0',
+                      textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 11,
-                        color: KiltoColors.white.withOpacity(0.25),
+                        color: KiltoColors.textTertiary,
                       ),
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 16),
                   ],
                 ),
               ),
@@ -317,28 +275,28 @@ class _LoginScreenState extends State<LoginScreen> {
       controller: controller,
       keyboardType: keyboardType,
       obscureText: obscureText,
-      style: const TextStyle(color: KiltoColors.navy, fontSize: 15),
+      style: const TextStyle(color: KiltoColors.textPrimary, fontSize: 15),
       decoration: InputDecoration(
         hintText: hintText,
-        hintStyle: const TextStyle(color: KiltoColors.greyText, fontSize: 14),
-        prefixIcon: Icon(prefixIcon, color: KiltoColors.greyText, size: 20),
+        prefixIcon: Icon(prefixIcon, color: KiltoColors.textTertiary, size: 20),
         suffixIcon: suffixIcon,
-        filled: true,
-        fillColor: KiltoColors.white,
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: KiltoColors.teal, width: 2),
-        ),
+      ),
+    );
+  }
+}
+
+class _FieldLabel extends StatelessWidget {
+  const _FieldLabel(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: const TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w500,
+        color: KiltoColors.textSecondary,
       ),
     );
   }

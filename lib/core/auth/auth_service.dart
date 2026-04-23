@@ -14,7 +14,7 @@ class AuthService {
     required String password,
     required String tenantSlug,
   }) async {
-    final response = await api.dio.post('/auth/login', data: {
+    final response = await api.dio.post('/v1/auth/login', data: {
       'email': email,
       'password': password,
       'tenant_slug': tenantSlug,
@@ -41,7 +41,7 @@ class AuthService {
     String? phone,
   }) async {
     // First resolve tenant ID from slug
-    final response = await api.dio.post('/auth/register', data: {
+    final response = await api.dio.post('/v1/auth/register', data: {
       'name': name,
       'email': email,
       'password': password,
@@ -64,7 +64,7 @@ class AuthService {
 
   Future<void> logout() async {
     try {
-      await api.post('/auth/logout');
+      await api.post('/v1/auth/logout');
     } catch (_) {
       // Ignore errors on logout
     }
@@ -76,7 +76,7 @@ class AuthService {
     if (token == null) return null;
 
     try {
-      final response = await api.get('/auth/me');
+      final response = await api.get('/v1/auth/me');
       return response.data['user'] as Map<String, dynamic>?;
     } catch (_) {
       await storage.clearAll();

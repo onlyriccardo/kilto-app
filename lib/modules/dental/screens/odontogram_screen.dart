@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../config/theme.dart';
 import '../../../config/demo_mode.dart';
 import '../../../config/demo_data.dart';
+import '../../../core/api/v1/models.dart';
+import '../../../core/api/v1/v1_providers.dart';
 
 enum ToothStatus { healthy, treated, attention, extracted }
 
@@ -19,7 +22,13 @@ class ToothData {
   });
 }
 
-class OdontogramScreen extends StatelessWidget {
+/// Odontogram tab inside Documents.
+///
+/// Demo mode keeps the legacy hardcoded DemoData path. Real mode pulls
+/// `GET /v1/modules/dental/odontogram` and folds `surface_states` +
+/// `treatments` into one `ToothData` per FDI, so the custom tooth painter
+/// doesn't need to change.
+class OdontogramScreen extends ConsumerWidget {
   const OdontogramScreen({super.key});
 
   static const _statusColors = {
@@ -36,209 +45,304 @@ class OdontogramScreen extends StatelessWidget {
     ToothStatus.extracted: 'Extraído',
   };
 
-  static const _statusMap = {
-    'healthy': ToothStatus.healthy,
-    'treated': ToothStatus.treated,
-    'attention': ToothStatus.attention,
-    'extracted': ToothStatus.extracted,
+  // FDI numbering order for each arch — right quadrant first, then left.
+  static const _upperFdi = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28];
+  static const _lowerFdi = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38];
+
+  // Full FDI → display name dictionary.
+  static const _toothNames = <int, String>{
+    18: 'Tercer molar superior derecho',
+    17: 'Segundo molar superior derecho',
+    16: 'Primer molar superior derecho',
+    15: 'Segundo premolar superior derecho',
+    14: 'Primer premolar superior derecho',
+    13: 'Canino superior derecho',
+    12: 'Incisivo lateral superior derecho',
+    11: 'Incisivo central superior derecho',
+    21: 'Incisivo central superior izquierdo',
+    22: 'Incisivo lateral superior izquierdo',
+    23: 'Canino superior izquierdo',
+    24: 'Primer premolar superior izquierdo',
+    25: 'Segundo premolar superior izquierdo',
+    26: 'Primer molar superior izquierdo',
+    27: 'Segundo molar superior izquierdo',
+    28: 'Tercer molar superior izquierdo',
+    48: 'Tercer molar inferior derecho',
+    47: 'Segundo molar inferior derecho',
+    46: 'Primer molar inferior derecho',
+    45: 'Segundo premolar inferior derecho',
+    44: 'Primer premolar inferior derecho',
+    43: 'Canino inferior derecho',
+    42: 'Incisivo lateral inferior derecho',
+    41: 'Incisivo central inferior derecho',
+    31: 'Incisivo central inferior izquierdo',
+    32: 'Incisivo lateral inferior izquierdo',
+    33: 'Canino inferior izquierdo',
+    34: 'Primer premolar inferior izquierdo',
+    35: 'Segundo premolar inferior izquierdo',
+    36: 'Primer molar inferior izquierdo',
+    37: 'Segundo molar inferior izquierdo',
+    38: 'Tercer molar inferior izquierdo',
   };
 
-  static ToothData _fromDemoData(int fdi, Map<String, dynamic> data) {
-    final treatments = data['treatments'] as List<dynamic>? ?? [];
-    return ToothData(
-      fdiNumber: fdi,
-      name: data['name'] as String,
-      status: _statusMap[data['status']] ?? ToothStatus.healthy,
-      history: treatments.map((t) => '${(t as Map)['desc']} - ${t['date']}').toList(),
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (kDemoMode) {
+      return _buildBody(
+        context,
+        upper: _demoTeeth(_upperFdi),
+        lower: _demoTeeth(_lowerFdi),
+        note:
+            'Vista demo. Los datos provienen de ejemplos locales.',
+        onRetry: null,
+      );
+    }
+
+    final async = ref.watch(odontogramProvider);
+    return async.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => _buildError(e.toString(),
+          onRetry: () => ref.invalidate(odontogramProvider)),
+      data: (record) {
+        final upper = _realTeeth(_upperFdi, record);
+        final lower = _realTeeth(_lowerFdi, record);
+        final note = record.isEmpty
+            ? 'Tu clínica aún no ha registrado datos del odontograma.'
+            : 'Odontograma actualizado por tu profesional.';
+        return RefreshIndicator(
+          onRefresh: () async => ref.invalidate(odontogramProvider),
+          child: _buildBody(
+            context,
+            upper: upper,
+            lower: lower,
+            note: note,
+            onRetry: () => ref.invalidate(odontogramProvider),
+          ),
+        );
+      },
     );
   }
 
-  // Upper arch FDI order: 18-11 then 21-28
-  static const _upperFdi = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28];
-  // Lower arch FDI order: 48-41 then 31-38
-  static const _lowerFdi = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38];
+  // =====================================================================
+  // Data builders
+  // =====================================================================
+  List<ToothData> _realTeeth(List<int> fdis, OdontogramRecord record) {
+    return fdis.map((fdi) {
+      final key = fdi.toString();
+      final txs = record.treatments[key] ?? const <DentalTreatmentRecord>[];
+      final surfaces = record.surfaceStates[key] ?? const <String, String>{};
+      final status = _deriveStatus(txs, surfaces);
+      return ToothData(
+        fdiNumber: fdi,
+        name: _toothNames[fdi] ?? 'Pieza $fdi',
+        status: status,
+        history: txs.map((t) => t.summary()).toList(),
+      );
+    }).toList();
+  }
 
-  List<ToothData> get _upperTeeth => kDemoMode
-      ? _upperFdi.map((fdi) {
-          final data = DemoData.toothData[fdi];
-          if (data != null) return _fromDemoData(fdi, data);
-          return ToothData(fdiNumber: fdi, name: 'Tooth $fdi', status: ToothStatus.healthy);
-        }).toList()
-      : [
-          const ToothData(fdiNumber: 18, name: 'Tercer molar superior derecho', status: ToothStatus.healthy),
-          const ToothData(fdiNumber: 17, name: 'Segundo molar superior derecho', status: ToothStatus.treated, history: ['Amalgama - 15/01/2025']),
-          const ToothData(fdiNumber: 16, name: 'Primer molar superior derecho', status: ToothStatus.healthy),
-          const ToothData(fdiNumber: 15, name: 'Segundo premolar superior derecho', status: ToothStatus.healthy),
-          const ToothData(fdiNumber: 14, name: 'Primer premolar superior derecho', status: ToothStatus.attention, history: ['Caries detectada - 28/03/2026']),
-          const ToothData(fdiNumber: 13, name: 'Canino superior derecho', status: ToothStatus.healthy),
-          const ToothData(fdiNumber: 12, name: 'Incisivo lateral superior derecho', status: ToothStatus.healthy),
-          const ToothData(fdiNumber: 11, name: 'Incisivo central superior derecho', status: ToothStatus.treated, history: ['Resina compuesta - 10/06/2024']),
-          const ToothData(fdiNumber: 21, name: 'Incisivo central superior izquierdo', status: ToothStatus.healthy),
-          const ToothData(fdiNumber: 22, name: 'Incisivo lateral superior izquierdo', status: ToothStatus.healthy),
-          const ToothData(fdiNumber: 23, name: 'Canino superior izquierdo', status: ToothStatus.healthy),
-          const ToothData(fdiNumber: 24, name: 'Primer premolar superior izquierdo', status: ToothStatus.healthy),
-          const ToothData(fdiNumber: 25, name: 'Segundo premolar superior izquierdo', status: ToothStatus.healthy),
-          const ToothData(fdiNumber: 26, name: 'Primer molar superior izquierdo', status: ToothStatus.treated, history: ['Endodoncia - 05/09/2024', 'Corona - 20/09/2024']),
-          const ToothData(fdiNumber: 27, name: 'Segundo molar superior izquierdo', status: ToothStatus.healthy),
-          const ToothData(fdiNumber: 28, name: 'Tercer molar superior izquierdo', status: ToothStatus.extracted, history: ['Extracción - 12/03/2025']),
-        ];
+  ToothStatus _deriveStatus(
+    List<DentalTreatmentRecord> txs,
+    Map<String, String> surfaces,
+  ) {
+    // 1. Extraction = hard signal.
+    for (final t in txs) {
+      final code = (t.treatmentCode ?? '').toLowerCase();
+      if (code.contains('extract')) return ToothStatus.extracted;
+    }
+    // 2. Unresolved caries / fracture / other issue surface state = attention.
+    for (final state in surfaces.values) {
+      final s = state.toLowerCase();
+      if (s.isEmpty) continue;
+      if (s.contains('caries') ||
+          s.contains('fractur') ||
+          s.contains('lesion') ||
+          s.contains('atencion') ||
+          s == 'issue') {
+        return ToothStatus.attention;
+      }
+    }
+    // 3. Treatment history present = treated (amalgam, resin, endo, crown, ...).
+    if (txs.any((t) => t.isResolved || (t.treatmentCode ?? '').isNotEmpty)) {
+      return ToothStatus.treated;
+    }
+    // 4. Default.
+    return ToothStatus.healthy;
+  }
 
-  List<ToothData> get _lowerTeeth => kDemoMode
-      ? _lowerFdi.map((fdi) {
-          final data = DemoData.toothData[fdi];
-          if (data != null) return _fromDemoData(fdi, data);
-          return ToothData(fdiNumber: fdi, name: 'Tooth $fdi', status: ToothStatus.healthy);
-        }).toList()
-      : [
-          const ToothData(fdiNumber: 48, name: 'Tercer molar inferior derecho', status: ToothStatus.extracted, history: ['Extracción - 12/03/2025']),
-          const ToothData(fdiNumber: 47, name: 'Segundo molar inferior derecho', status: ToothStatus.healthy),
-          const ToothData(fdiNumber: 46, name: 'Primer molar inferior derecho', status: ToothStatus.attention, history: ['Caries profunda - 28/03/2026']),
-          const ToothData(fdiNumber: 45, name: 'Segundo premolar inferior derecho', status: ToothStatus.healthy),
-          const ToothData(fdiNumber: 44, name: 'Primer premolar inferior derecho', status: ToothStatus.healthy),
-          const ToothData(fdiNumber: 43, name: 'Canino inferior derecho', status: ToothStatus.healthy),
-          const ToothData(fdiNumber: 42, name: 'Incisivo lateral inferior derecho', status: ToothStatus.healthy),
-          const ToothData(fdiNumber: 41, name: 'Incisivo central inferior derecho', status: ToothStatus.healthy),
-          const ToothData(fdiNumber: 31, name: 'Incisivo central inferior izquierdo', status: ToothStatus.healthy),
-          const ToothData(fdiNumber: 32, name: 'Incisivo lateral inferior izquierdo', status: ToothStatus.healthy),
-          const ToothData(fdiNumber: 33, name: 'Canino inferior izquierdo', status: ToothStatus.healthy),
-          const ToothData(fdiNumber: 34, name: 'Primer premolar inferior izquierdo', status: ToothStatus.treated, history: ['Resina - 15/01/2025']),
-          const ToothData(fdiNumber: 35, name: 'Segundo premolar inferior izquierdo', status: ToothStatus.healthy),
-          const ToothData(fdiNumber: 36, name: 'Primer molar inferior izquierdo', status: ToothStatus.healthy),
-          const ToothData(fdiNumber: 37, name: 'Segundo molar inferior izquierdo', status: ToothStatus.healthy),
-          const ToothData(fdiNumber: 38, name: 'Tercer molar inferior izquierdo', status: ToothStatus.healthy),
-        ];
+  List<ToothData> _demoTeeth(List<int> fdis) {
+    const statusMap = {
+      'healthy': ToothStatus.healthy,
+      'treated': ToothStatus.treated,
+      'attention': ToothStatus.attention,
+      'extracted': ToothStatus.extracted,
+    };
+    return fdis.map((fdi) {
+      final data = DemoData.toothData[fdi];
+      if (data == null) {
+        return ToothData(
+          fdiNumber: fdi,
+          name: _toothNames[fdi] ?? 'Pieza $fdi',
+          status: ToothStatus.healthy,
+        );
+      }
+      final treatments = data['treatments'] as List<dynamic>? ?? [];
+      return ToothData(
+        fdiNumber: fdi,
+        name: (data['name'] as String?) ?? _toothNames[fdi] ?? 'Pieza $fdi',
+        status: statusMap[data['status']] ?? ToothStatus.healthy,
+        history: treatments
+            .map((t) => '${(t as Map)['desc']} - ${t['date']}')
+            .toList(),
+      );
+    }).toList();
+  }
 
-  @override
-  Widget build(BuildContext context) {
-    final allTeeth = [..._upperTeeth, ..._lowerTeeth];
-    final healthyCount = allTeeth.where((t) => t.status == ToothStatus.healthy).length;
-    final treatedCount = allTeeth.where((t) => t.status == ToothStatus.treated).length;
-    final attentionCount = allTeeth.where((t) => t.status == ToothStatus.attention).length;
-    final extractedCount = allTeeth.where((t) => t.status == ToothStatus.extracted).length;
+  // =====================================================================
+  // UI
+  // =====================================================================
+  Widget _buildBody(
+    BuildContext context, {
+    required List<ToothData> upper,
+    required List<ToothData> lower,
+    required String note,
+    required VoidCallback? onRetry,
+  }) {
+    final allTeeth = [...upper, ...lower];
+    final healthy = allTeeth.where((t) => t.status == ToothStatus.healthy).length;
+    final treated = allTeeth.where((t) => t.status == ToothStatus.treated).length;
+    final attention = allTeeth.where((t) => t.status == ToothStatus.attention).length;
+    final extracted = allTeeth.where((t) => t.status == ToothStatus.extracted).length;
 
     return SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Coming soon note
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: KiltoColors.tealLight,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.info_outline, size: 16, color: KiltoColors.tealDark),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Vista de solo lectura. Vista interactiva disponible próximamente.',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: KiltoColors.navy.withOpacity(0.7),
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: KiltoColors.tealLight,
+              borderRadius: BorderRadius.circular(10),
             ),
-            const SizedBox(height: 16),
-
-            // Legend
-            _buildLegend(),
-            const SizedBox(height: 20),
-
-            // Upper arch
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: KiltoColors.white,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: KiltoColors.greyMid),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Arcada Superior',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: KiltoColors.navy,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  _buildToothRow(context, _upperTeeth, isUpper: true),
-                ],
-              ),
-            ),
-            const SizedBox(height: 4),
-
-            // Divider
-            Center(
-              child: Container(
-                width: 60,
-                height: 2,
-                color: KiltoColors.greyMid,
-              ),
-            ),
-            const SizedBox(height: 4),
-
-            // Lower arch
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: KiltoColors.white,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: KiltoColors.greyMid),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Arcada Inferior',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: KiltoColors.navy,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  _buildToothRow(context, _lowerTeeth, isUpper: false),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // Summary cards
-            Row(
+            child: Row(
               children: [
-                Expanded(
-                    child: _buildSummaryCard(
-                        'Sano', healthyCount, KiltoColors.green, KiltoColors.greenLight)),
+                const Icon(Icons.info_outline,
+                    size: 16, color: KiltoColors.tealDark),
                 const SizedBox(width: 8),
                 Expanded(
-                    child: _buildSummaryCard(
-                        'Tratado', treatedCount, KiltoColors.blue, KiltoColors.blueLight)),
-                const SizedBox(width: 8),
-                Expanded(
-                    child: _buildSummaryCard(
-                        'Atención', attentionCount, KiltoColors.yellow, KiltoColors.yellowLight)),
-                const SizedBox(width: 8),
-                Expanded(
-                    child: _buildSummaryCard(
-                        'Extraído', extractedCount, KiltoColors.greyText, KiltoColors.grey)),
+                  child: Text(
+                    note,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: KiltoColors.navy.withOpacity(0.7),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
               ],
             ),
-            const SizedBox(height: 24),
+          ),
+          const SizedBox(height: 16),
+          _buildLegend(),
+          const SizedBox(height: 20),
+          _buildArch(context, upper, title: 'Arcada Superior', isUpper: true),
+          const SizedBox(height: 4),
+          Center(
+            child: Container(
+              width: 60,
+              height: 2,
+              color: KiltoColors.greyMid,
+            ),
+          ),
+          const SizedBox(height: 4),
+          _buildArch(context, lower, title: 'Arcada Inferior', isUpper: false),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(
+                child: _buildSummaryCard(
+                    'Sano', healthy, KiltoColors.green, KiltoColors.greenLight),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildSummaryCard(
+                    'Tratado', treated, KiltoColors.blue, KiltoColors.blueLight),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildSummaryCard('Atención', attention,
+                    KiltoColors.yellow, KiltoColors.yellowLight),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildSummaryCard('Extraído', extracted,
+                    KiltoColors.greyText, KiltoColors.grey),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildError(String msg, {required VoidCallback onRetry}) => Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline,
+                size: 48, color: KiltoColors.greyText),
+            const SizedBox(height: 12),
+            const Text('No se pudo cargar el odontograma',
+                style: TextStyle(
+                    fontSize: 15, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 6),
+            Text(msg,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontSize: 12, color: KiltoColors.greyText)),
+            const SizedBox(height: 16),
+            OutlinedButton(
+              onPressed: onRetry,
+              child: const Text('Reintentar'),
+            ),
           ],
         ),
+      );
+
+  Widget _buildArch(
+    BuildContext context,
+    List<ToothData> teeth, {
+    required String title,
+    required bool isUpper,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: KiltoColors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: KiltoColors.greyMid),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: KiltoColors.navy,
+            ),
+          ),
+          const SizedBox(height: 12),
+          _buildToothRow(context, teeth, isUpper: isUpper),
+        ],
+      ),
     );
   }
 
@@ -278,21 +382,22 @@ class OdontogramScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildToothRow(BuildContext context, List<ToothData> teeth, {bool isUpper = true}) {
+  Widget _buildToothRow(
+    BuildContext context,
+    List<ToothData> teeth, {
+    bool isUpper = true,
+  }) {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // First 8 teeth (right quadrant)
-          ...teeth.take(8).map((tooth) => _buildTooth(context, tooth, isUpper)),
-          // Midline separator
+          ...teeth.take(8).map((t) => _buildTooth(context, t, isUpper)),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4),
             child: Container(width: 1, height: 40, color: KiltoColors.greyMid),
           ),
-          // Last 8 teeth (left quadrant)
-          ...teeth.skip(8).map((tooth) => _buildTooth(context, tooth, isUpper)),
+          ...teeth.skip(8).map((t) => _buildTooth(context, t, isUpper)),
         ],
       ),
     );
@@ -301,7 +406,8 @@ class OdontogramScreen extends StatelessWidget {
   Widget _buildTooth(BuildContext context, ToothData tooth, bool isUpper) {
     final fill = _statusColors[tooth.status] ?? KiltoColors.white;
     final isExtracted = tooth.status == ToothStatus.extracted;
-    final borderColor = tooth.status == ToothStatus.healthy ? KiltoColors.greyMid : fill;
+    final borderColor =
+        tooth.status == ToothStatus.healthy ? KiltoColors.greyMid : fill;
 
     return GestureDetector(
       onTap: () => _showToothDetail(context, tooth),
@@ -309,10 +415,15 @@ class OdontogramScreen extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 1),
         child: Column(
           children: [
-            if (isUpper) Text(
-              '${tooth.fdiNumber}',
-              style: const TextStyle(fontSize: 8, fontWeight: FontWeight.w600, color: KiltoColors.greyText),
-            ),
+            if (isUpper)
+              Text(
+                '${tooth.fdiNumber}',
+                style: const TextStyle(
+                  fontSize: 8,
+                  fontWeight: FontWeight.w600,
+                  color: KiltoColors.greyText,
+                ),
+              ),
             if (isUpper) const SizedBox(height: 2),
             Opacity(
               opacity: isExtracted ? 0.4 : 1.0,
@@ -330,10 +441,15 @@ class OdontogramScreen extends StatelessWidget {
               ),
             ),
             if (!isUpper) const SizedBox(height: 2),
-            if (!isUpper) Text(
-              '${tooth.fdiNumber}',
-              style: const TextStyle(fontSize: 8, fontWeight: FontWeight.w600, color: KiltoColors.greyText),
-            ),
+            if (!isUpper)
+              Text(
+                '${tooth.fdiNumber}',
+                style: const TextStyle(
+                  fontSize: 8,
+                  fontWeight: FontWeight.w600,
+                  color: KiltoColors.greyText,
+                ),
+              ),
           ],
         ),
       ),
@@ -389,7 +505,6 @@ class OdontogramScreen extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Handle
               Center(
                 child: Container(
                   width: 40,
@@ -401,7 +516,6 @@ class OdontogramScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 20),
-              // Tooth number and status
               Row(
                 children: [
                   Container(
@@ -419,7 +533,8 @@ class OdontogramScreen extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.w800,
-                          color: isHealthyColor ? KiltoColors.green : statusColor,
+                          color:
+                              isHealthyColor ? KiltoColors.green : statusColor,
                         ),
                       ),
                     ),
@@ -477,14 +592,21 @@ class OdontogramScreen extends StatelessWidget {
                 ...tooth.history.map((entry) => Padding(
                       padding: const EdgeInsets.only(bottom: 8),
                       child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Icon(Icons.circle, size: 6, color: KiltoColors.teal),
+                          const Padding(
+                            padding: EdgeInsets.only(top: 6),
+                            child: Icon(Icons.circle,
+                                size: 6, color: KiltoColors.teal),
+                          ),
                           const SizedBox(width: 10),
-                          Text(
-                            entry,
-                            style: const TextStyle(
-                              fontSize: 13,
-                              color: KiltoColors.navy,
+                          Expanded(
+                            child: Text(
+                              entry,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: KiltoColors.navy,
+                              ),
                             ),
                           ),
                         ],
@@ -509,9 +631,9 @@ class OdontogramScreen extends StatelessWidget {
   }
 }
 
-/// CustomPainter that draws a tooth shape — crown + root
-/// Upper teeth: crown at top, root pointing down
-/// Lower teeth: root pointing up, crown at bottom
+/// CustomPainter that draws a tooth shape — crown + root.
+/// Upper teeth: crown at top, root pointing down.
+/// Lower teeth: root pointing up, crown at bottom.
 class _ToothPainter extends CustomPainter {
   final Color fillColor;
   final Color borderColor;
@@ -538,15 +660,11 @@ class _ToothPainter extends CustomPainter {
     final path = Path();
 
     if (isUpper) {
-      // Upper tooth: wide crown at top, narrow root at bottom
-      // Crown
       path.moveTo(w * 0.15, h * 0.12);
       path.quadraticBezierTo(w * 0.15, 0, w * 0.5, 0);
       path.quadraticBezierTo(w * 0.85, 0, w * 0.85, h * 0.12);
-      // Right side down to root
       path.lineTo(w * 0.82, h * 0.45);
       path.quadraticBezierTo(w * 0.80, h * 0.55, w * 0.70, h * 0.55);
-      // Root
       path.lineTo(w * 0.62, h * 0.55);
       path.quadraticBezierTo(w * 0.55, h * 0.6, w * 0.5, h * 0.85);
       path.quadraticBezierTo(w * 0.45, h * 0.6, w * 0.38, h * 0.55);
@@ -555,18 +673,14 @@ class _ToothPainter extends CustomPainter {
       path.lineTo(w * 0.15, h * 0.12);
       path.close();
     } else {
-      // Lower tooth: narrow root at top, wide crown at bottom
-      // Root
       path.moveTo(w * 0.38, h * 0.45);
       path.lineTo(w * 0.30, h * 0.45);
       path.quadraticBezierTo(w * 0.20, h * 0.45, w * 0.18, h * 0.55);
-      // Crown
       path.lineTo(w * 0.15, h * 0.88);
       path.quadraticBezierTo(w * 0.15, h, w * 0.5, h);
       path.quadraticBezierTo(w * 0.85, h, w * 0.85, h * 0.88);
       path.lineTo(w * 0.82, h * 0.55);
       path.quadraticBezierTo(w * 0.80, h * 0.45, w * 0.70, h * 0.45);
-      // Root
       path.lineTo(w * 0.62, h * 0.45);
       path.quadraticBezierTo(w * 0.55, h * 0.4, w * 0.5, h * 0.15);
       path.quadraticBezierTo(w * 0.45, h * 0.4, w * 0.38, h * 0.45);
@@ -576,7 +690,6 @@ class _ToothPainter extends CustomPainter {
     canvas.drawPath(path, paint);
     canvas.drawPath(path, stroke);
 
-    // X mark for extracted teeth
     if (isExtracted) {
       final xPaint = Paint()
         ..color = const Color(0xFF94A3B8)

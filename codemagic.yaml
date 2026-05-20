@@ -53,7 +53,7 @@ workflows:
     environment:
       groups:
         - kilto_signing     # CM_KEYSTORE (base64), CM_KEYSTORE_PASSWORD, CM_KEY_ALIAS, CM_KEY_PASSWORD
-        # - google_play     # re-enable once GCLOUD_SERVICE_ACCOUNT_CREDENTIALS is set
+        - google_play       # GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
       flutter: 3.27.4
     scripts:
       - name: Decode keystore and write key.properties
@@ -76,8 +76,8 @@ workflows:
     artifacts:
       - build/app/outputs/bundle/release/*.aab
       - build/app/outputs/mapping/release/mapping.txt
-    # publishing:
-    #   google_play:
-    #     credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
-    #     track: internal      # change to "alpha" / "beta" / "production" once verified
-    #     submit_as_draft: false
+    publishing:
+      google_play:
+        credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+        track: internal      # bump to "production" once verified in Play Console
+        submit_as_draft: false

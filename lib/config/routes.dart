@@ -222,7 +222,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       // they lose the ClinicAccentTheme that wraps the shell. Re-wrap each
       // one so the clinic accent still applies while inside a clinic.
       GoRoute(path: '/client/book-appointment', builder: (_, __) => const ClinicAccentTheme(child: BookAppointmentScreen())),
-      GoRoute(path: '/client/chat', builder: (_, __) => const ClinicAccentTheme(child: ChatScreen())),
+      if (kClientChatEnabled)
+        GoRoute(path: '/client/chat', builder: (_, __) => const ClinicAccentTheme(child: ChatScreen())),
       GoRoute(path: '/client/notifications', builder: (_, __) => const ClinicAccentTheme(child: NotificationsScreen())),
 
       // Clinic routes — same: no transition between tabs in the clinic shell.

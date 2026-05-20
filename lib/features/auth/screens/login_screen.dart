@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import '../../../config/feature_flags.dart';
 import '../../../config/theme.dart';
@@ -9,6 +8,8 @@ import '../../../core/auth/auth_service.dart';
 import '../../../core/auth/auth_state.dart';
 import '../../../core/auth/auth_providers.dart';
 import '../../../core/storage/secure_storage.dart';
+import '../../../core/widgets/kilto_text.dart';
+import '../../../core/widgets/kilto_wordmark.dart';
 
 /// Legacy providers kept for the pre-Kilto-central-auth flow.
 final apiClientProvider = Provider<ApiClient>(
@@ -121,7 +122,7 @@ class _LoginScreenState extends State<LoginScreen> {
     return Consumer(
       builder: (context, ref, _) {
         return Scaffold(
-          backgroundColor: KiltoColors.bg,
+          backgroundColor: KiltoColors.surface,
           body: SafeArea(
             child: SingleChildScrollView(
               padding: const EdgeInsets.symmetric(horizontal: 28),
@@ -133,30 +134,25 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const SizedBox(height: 64),
-                    Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        SvgPicture.asset(
-                          'assets/brand/kilto-wordmark-light.svg',
-                          height: 44,
-                          semanticsLabel: 'Kilto',
-                        ),
-                        const SizedBox(height: 12),
-                        const Text(
-                          'Tu negocio, en un solo lugar',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: KiltoColors.textSecondary,
-                          ),
-                        ),
-                      ],
+                    const SizedBox(height: 56),
+                    const Center(
+                      child: KiltoWordmark(
+                        iconSize: 56,
+                        textSize: 22,
+                        direction: Axis.vertical,
+                        gap: 10,
+                      ),
                     ),
-                    const SizedBox(height: 48),
+                    const SizedBox(height: 36),
+                    KiltoText.h1('Inicia sesión'),
+                    const SizedBox(height: 8),
+                    KiltoText.body(
+                      'Bienvenido de vuelta. Conecta con tu clínica en segundos.',
+                      color: KiltoColors.zinc500,
+                    ),
+                    const SizedBox(height: 32),
                     if (!kCentralAuth) ...[
-                      const _FieldLabel('Clínica'),
+                      KiltoText.eyebrow('Clínica'),
                       const SizedBox(height: 6),
                       _buildTextField(
                         controller: _tenantController,
@@ -166,7 +162,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       const SizedBox(height: 16),
                     ],
-                    const _FieldLabel('Correo'),
+                    KiltoText.eyebrow('Correo'),
                     const SizedBox(height: 6),
                     _buildTextField(
                       controller: _emailController,
@@ -175,7 +171,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       keyboardType: TextInputType.emailAddress,
                     ),
                     const SizedBox(height: 16),
-                    const _FieldLabel('Contraseña'),
+                    KiltoText.eyebrow('Contraseña'),
                     const SizedBox(height: 6),
                     _buildTextField(
                       controller: _passwordController,
@@ -187,7 +183,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           _obscurePassword
                               ? Icons.visibility_off_outlined
                               : Icons.visibility_outlined,
-                          color: KiltoColors.textTertiary,
+                          color: KiltoColors.zinc400,
                           size: 20,
                         ),
                         onPressed: () {
@@ -210,32 +206,29 @@ class _LoginScreenState extends State<LoginScreen> {
                                   color: KiltoColors.onBrand,
                                 ),
                               )
-                            : const Text(
-                                'Iniciar sesión',
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
+                            : const Text('Iniciar sesión'),
                       ),
                     ),
                     if (kCentralAuth) ...[
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 14),
                       TextButton(
                         onPressed: () => context.push('/register'),
                         child: const Text.rich(
                           TextSpan(
                             style: TextStyle(
-                              fontSize: 14,
-                              color: KiltoColors.textSecondary,
+                              fontFamily: KiltoFonts.familyBody,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              color: KiltoColors.zinc500,
                             ),
                             children: [
                               TextSpan(text: '¿No tienes cuenta? '),
                               TextSpan(
                                 text: 'Crear cuenta',
                                 style: TextStyle(
-                                  color: KiltoColors.brandPrimary,
-                                  fontWeight: FontWeight.w600,
+                                  fontFamily: KiltoFonts.familyHeading,
+                                  color: KiltoColors.zinc950,
+                                  fontWeight: FontWeight.w800,
                                 ),
                               ),
                             ],
@@ -244,13 +237,10 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ],
                     const SizedBox(height: 40),
-                    const Text(
+                    KiltoText.label(
                       'Powered by Kilto · v1.0',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: KiltoColors.textTertiary,
-                      ),
+                      align: TextAlign.center,
+                      color: KiltoColors.zinc400,
                     ),
                     const SizedBox(height: 16),
                   ],
@@ -275,28 +265,16 @@ class _LoginScreenState extends State<LoginScreen> {
       controller: controller,
       keyboardType: keyboardType,
       obscureText: obscureText,
-      style: const TextStyle(color: KiltoColors.textPrimary, fontSize: 15),
+      style: const TextStyle(
+        color: KiltoColors.zinc950,
+        fontFamily: KiltoFonts.familyBody,
+        fontSize: 14,
+        fontWeight: FontWeight.w500,
+      ),
       decoration: InputDecoration(
         hintText: hintText,
-        prefixIcon: Icon(prefixIcon, color: KiltoColors.textTertiary, size: 20),
+        prefixIcon: Icon(prefixIcon, color: KiltoColors.zinc400, size: 18),
         suffixIcon: suffixIcon,
-      ),
-    );
-  }
-}
-
-class _FieldLabel extends StatelessWidget {
-  const _FieldLabel(this.text);
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: const TextStyle(
-        fontSize: 13,
-        fontWeight: FontWeight.w500,
-        color: KiltoColors.textSecondary,
       ),
     );
   }

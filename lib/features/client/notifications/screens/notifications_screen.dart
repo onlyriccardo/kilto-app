@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../../../config/theme.dart';
-import '../../../../config/demo_mode.dart';
+import '../../../../config/clinic_theme.dart';
 import '../../../../config/demo_data.dart';
+import '../../../../config/demo_mode.dart';
+import '../../../../config/theme.dart';
 import '../../../../core/api/v1/models.dart';
 import '../../../../core/api/v1/v1_providers.dart';
+import '../../../../core/widgets/kilto_empty_state.dart';
+import '../../../../core/widgets/kilto_text.dart';
 
 class NotificationsScreen extends ConsumerStatefulWidget {
   const NotificationsScreen({super.key});
@@ -19,45 +22,65 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: KiltoColors.grey,
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.chevron_left, size: 28),
-          onPressed: () {
-            if (context.canPop()) {
-              context.pop();
-            } else {
-              context.go('/client/home');
-            }
-          },
-        ),
-        title: const Text('Notificaciones'),
-        centerTitle: false,
-        actions: [
-          TextButton(
-            onPressed: _onMarkAll,
-            child: const Text(
-              'Marcar todo',
-              style: TextStyle(
-                fontSize: 13,
-                color: KiltoColors.teal,
-                fontWeight: FontWeight.w600,
+      backgroundColor: KiltoColors.bg,
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+              child: Row(
+                children: [
+                  IconButton(
+                    onPressed: () => context.canPop()
+                        ? context.pop()
+                        : context.go('/client/home'),
+                    icon: const Icon(Icons.arrow_back_rounded,
+                        color: KiltoColors.zinc900),
+                    style: IconButton.styleFrom(
+                      backgroundColor: KiltoColors.surface,
+                      shape: RoundedRectangleBorder(
+                        borderRadius:
+                            BorderRadius.circular(KiltoRadii.xsmall),
+                        side: const BorderSide(color: KiltoColors.border),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        KiltoText.label('Tu clínica'),
+                        KiltoText.h3('Notificaciones'),
+                      ],
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _onMarkAll,
+                    style: TextButton.styleFrom(
+                      foregroundColor: KiltoColors.zinc950,
+                      textStyle: const TextStyle(
+                        fontFamily: KiltoFonts.familyHeading,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    child: const Text('Marcar todo'),
+                  ),
+                ],
               ),
             ),
-          ),
-        ],
+            Expanded(child: kDemoMode ? _demoBody() : _realBody()),
+          ],
+        ),
       ),
-      body: kDemoMode ? _demoBody() : _realBody(),
     );
   }
 
   // ── Demo path (reads from DemoData, local state toggles) ────────────
   late final List<_DemoNotif> _demoItems = DemoData.notifications
       .map((n) => _DemoNotif(
-            icon: Icons.notifications_outlined,
-            iconColor: (n['unread'] as bool)
-                ? KiltoColors.teal
-                : KiltoColors.greyText,
             title: (n['icon'] as String),
             body: n['text'] as String,
             time: n['time'] as String,
@@ -68,21 +91,20 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
   Widget _demoBody() {
     return RefreshIndicator(
       onRefresh: () async => await Future.delayed(const Duration(seconds: 1)),
-      color: KiltoColors.teal,
       child: _demoItems.isEmpty
-          ? _buildEmptyState()
-          : ListView.builder(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          ? _empty()
+          : ListView.separated(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
               itemCount: _demoItems.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 8),
               itemBuilder: (_, i) {
                 final n = _demoItems[i];
-                return _tile(
-                  isRead: n.isRead,
-                  icon: n.icon,
-                  iconColor: n.iconColor,
+                return _NotifTile(
+                  icon: Icons.notifications_outlined,
                   title: n.title,
                   body: n.body,
                   time: n.time,
+                  isRead: n.isRead,
                   onTap: () => setState(() => n.isRead = true),
                 );
               },
@@ -97,27 +119,25 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => _errorState(e.toString()),
       data: (items) => RefreshIndicator(
-        color: KiltoColors.teal,
         onRefresh: () async => ref.invalidate(notificationsProvider),
         child: items.isEmpty
             ? ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                children: [SizedBox(height: 100), _buildEmptyState()],
+                children: [const SizedBox(height: 80), _empty()],
               )
-            : ListView.builder(
+            : ListView.separated(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
                 itemCount: items.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
                 itemBuilder: (_, i) {
                   final n = items[i];
-                  return _tile(
-                    isRead: n.read,
+                  return _NotifTile(
                     icon: _iconFor(n.icon),
-                    iconColor: _iconColor(n.read),
                     title: n.title,
                     body: n.body ?? '',
                     time: _formatTime(n.createdAt),
+                    isRead: n.read,
                     onTap: () => _onMarkRead(n),
                   );
                 },
@@ -173,9 +193,6 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
     }
   }
 
-  Color _iconColor(bool read) =>
-      read ? KiltoColors.greyText : KiltoColors.teal;
-
   String _formatTime(DateTime? dt) {
     if (dt == null) return '';
     final diff = DateTime.now().difference(dt);
@@ -186,167 +203,137 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
     return '${dt.day}/${dt.month}/${dt.year}';
   }
 
-  Widget _tile({
-    required bool isRead,
-    required IconData icon,
-    required Color iconColor,
-    required String title,
-    required String body,
-    required String time,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: isRead
-              ? KiltoColors.white
-              : KiltoColors.teal.withOpacity(0.04),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isRead
-                ? KiltoColors.greyMid
-                : KiltoColors.teal.withOpacity(0.2),
-          ),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (!isRead)
-              Container(
-                width: 8,
-                height: 8,
-                margin: const EdgeInsets.only(top: 6, right: 8),
-                decoration: const BoxDecoration(
-                  color: KiltoColors.teal,
-                  shape: BoxShape.circle,
-                ),
-              )
-            else
-              const SizedBox(width: 16),
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: iconColor.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(icon, color: iconColor, size: 20),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight:
-                          isRead ? FontWeight.w600 : FontWeight.w700,
-                      color: KiltoColors.navy,
-                    ),
-                  ),
-                  if (body.isNotEmpty) ...[
-                    const SizedBox(height: 3),
-                    Text(
-                      body,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: KiltoColors.greyText,
-                      ),
-                    ),
-                  ],
-                  if (time.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      time,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: KiltoColors.greyText.withOpacity(0.7),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  Widget _empty() => KiltoEmptyState(
+        icon: Icons.notifications_off_outlined,
+        title: 'Sin notificaciones',
+        subtitle: 'No tienes notificaciones pendientes.',
+      );
 
-  Widget _buildEmptyState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.notifications_off_outlined,
-              size: 64,
-              color: KiltoColors.greyText.withOpacity(0.4),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Sin notificaciones',
-              style: TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w600,
-                color: KiltoColors.navy,
-              ),
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'No tienes notificaciones pendientes',
-              style:
-                  TextStyle(fontSize: 13, color: KiltoColors.greyText),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _errorState(String msg) => Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.error_outline,
-                size: 48, color: KiltoColors.greyText),
-            const SizedBox(height: 12),
-            const Text('No se pudieron cargar las notificaciones',
-                style: TextStyle(
-                    fontSize: 15, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 6),
-            Text(msg,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    fontSize: 12, color: KiltoColors.greyText)),
-            const SizedBox(height: 16),
-            OutlinedButton(
-              onPressed: () => ref.invalidate(notificationsProvider),
-              child: const Text('Reintentar'),
-            ),
-          ],
-        ),
+  Widget _errorState(String msg) => KiltoEmptyState(
+        icon: Icons.error_outline_rounded,
+        title: 'No se pudieron cargar las notificaciones',
+        subtitle: msg,
+        actionLabel: 'Reintentar',
+        onAction: () => ref.invalidate(notificationsProvider),
       );
 }
 
-class _DemoNotif {
+class _NotifTile extends StatelessWidget {
   final IconData icon;
-  final Color iconColor;
+  final String title;
+  final String body;
+  final String time;
+  final bool isRead;
+  final VoidCallback onTap;
+
+  const _NotifTile({
+    required this.icon,
+    required this.title,
+    required this.body,
+    required this.time,
+    required this.isRead,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final accent =
+        Theme.of(context).extension<ClinicAccentExtension>()?.accent ??
+            KiltoColors.brandPrimary;
+    final radius = BorderRadius.circular(KiltoRadii.medium);
+
+    return Material(
+      color: Colors.transparent,
+      borderRadius: radius,
+      child: InkWell(
+        borderRadius: radius,
+        onTap: onTap,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: isRead
+                ? KiltoColors.surface
+                : Color.alphaBlend(
+                    accent.withValues(alpha: 0.05), Colors.white),
+            borderRadius: radius,
+            border: Border.all(
+              color: isRead
+                  ? KiltoColors.border
+                  : accent.withValues(alpha: 0.28),
+              width: 1,
+            ),
+            boxShadow: KiltoShadows.card,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: 10,
+                  child: Center(
+                    child: isRead
+                        ? const SizedBox.shrink()
+                        : Container(
+                            width: 8,
+                            height: 8,
+                            margin: const EdgeInsets.only(top: 6),
+                            decoration: BoxDecoration(
+                              color: accent,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: isRead
+                        ? KiltoColors.zinc100
+                        : accent.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(KiltoRadii.xsmall),
+                  ),
+                  child: Icon(
+                    icon,
+                    color: isRead ? KiltoColors.zinc500 : accent,
+                    size: 18,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      KiltoText.strong(title, size: 13.5),
+                      if (body.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        KiltoText.body(body,
+                            size: 12, color: KiltoColors.zinc600),
+                      ],
+                      if (time.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        KiltoText.label(time,
+                            size: 10.5, color: KiltoColors.zinc400),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DemoNotif {
   final String title;
   final String body;
   final String time;
   bool isRead;
   _DemoNotif({
-    required this.icon,
-    required this.iconColor,
     required this.title,
     required this.body,
     required this.time,

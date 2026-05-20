@@ -1,19 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../../../config/theme.dart';
-import '../../../../config/demo_mode.dart';
+import '../../../../config/clinic_theme.dart';
 import '../../../../config/demo_data.dart';
+import '../../../../config/demo_mode.dart';
+import '../../../../config/theme.dart';
 import '../../../../core/api/v1/models.dart';
 import '../../../../core/api/v1/v1_providers.dart';
+import '../../../../core/widgets/kilto_card.dart';
+import '../../../../core/widgets/kilto_empty_state.dart';
+import '../../../../core/widgets/kilto_text.dart';
 
 /// 4-step booking wizard:
 ///  0) service → /v1/services
 ///  1) staff   → /v1/staff
 ///  2) date + time → /v1/availability?date=&staff_id=
 ///  3) review + notes → POST /v1/appointments
-///
-/// Demo mode preserves the old hardcoded UI so /demo smoke-tests still work.
 class BookAppointmentScreen extends ConsumerStatefulWidget {
   const BookAppointmentScreen({super.key});
 
@@ -33,7 +35,6 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
   DateTime? _selectedDate;
   String? _selectedSlot;
 
-  // Built list of next 14 days
   final List<DateTime> _dates = List.generate(
     14,
     (i) => DateTime.now().add(Duration(days: i + 1)),
@@ -44,6 +45,10 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
     _notesController.dispose();
     super.dispose();
   }
+
+  Color get _accent =>
+      Theme.of(context).extension<ClinicAccentExtension>()?.accent ??
+      KiltoColors.brandPrimary;
 
   bool get _canProceed {
     switch (_currentStep) {
@@ -76,44 +81,83 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
 
   @override
   Widget build(BuildContext context) {
+    const labels = ['Servicio', 'Profesional', 'Fecha y hora', 'Confirmar'];
+
     return Scaffold(
-      backgroundColor: KiltoColors.grey,
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.chevron_left, size: 28),
-          onPressed: _prev,
+      backgroundColor: KiltoColors.bg,
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+              child: Row(
+                children: [
+                  IconButton(
+                    onPressed: _prev,
+                    icon: const Icon(Icons.arrow_back_rounded,
+                        color: KiltoColors.zinc900),
+                    style: IconButton.styleFrom(
+                      backgroundColor: KiltoColors.surface,
+                      shape: RoundedRectangleBorder(
+                        borderRadius:
+                            BorderRadius.circular(KiltoRadii.xsmall),
+                        side: const BorderSide(color: KiltoColors.border),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        KiltoText.label('Paso ${_currentStep + 1} de 4'),
+                        KiltoText.h3(labels[_currentStep]),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+              child: _ProgressBar(currentStep: _currentStep, accent: _accent),
+            ),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+                child: kDemoMode ? _buildDemoContent() : _buildRealStepContent(),
+              ),
+            ),
+            _Footer(
+              label: _currentStep == 3 ? 'Confirmar cita' : 'Continuar',
+              onPressed: kDemoMode
+                  ? (_demoCanProceed
+                      ? () {
+                          if (_currentStep == 3) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                  content: Text('Cita agendada (demo)')),
+                            );
+                            context.go('/client/appointments');
+                          } else {
+                            _next();
+                          }
+                        }
+                      : null)
+                  : (_canProceed
+                      ? (_currentStep == 3 ? _submit : _next)
+                      : null),
+              loading: _submitting,
+            ),
+          ],
         ),
-        title: const Text('Agendar cita'),
-        centerTitle: false,
       ),
-      body: kDemoMode ? _buildDemo() : _buildReal(),
     );
   }
 
-  // =====================================================================
-  // Real-API wizard
-  // =====================================================================
-  Widget _buildReal() {
-    return Column(
-      children: [
-        _buildProgressBar(),
-        Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: _buildRealStepContent(),
-          ),
-        ),
-        _buildFooterButton(
-          label: _currentStep == 3 ? 'Confirmar cita' : 'Continuar',
-          onPressed: _canProceed
-              ? (_currentStep == 3 ? _submit : _next)
-              : null,
-          loading: _submitting,
-        ),
-      ],
-    );
-  }
-
+  // ===================================================================
+  // Real-API steps
+  // ===================================================================
   Widget _buildRealStepContent() {
     switch (_currentStep) {
       case 0:
@@ -133,94 +177,39 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
     final async = ref.watch(servicesCatalogProvider);
     return async.when(
       loading: () => const Padding(
-        padding: EdgeInsets.all(40),
+        padding: EdgeInsets.symmetric(vertical: 40),
         child: Center(child: CircularProgressIndicator()),
       ),
       error: (e, _) => _errorBlock('No se pudieron cargar los servicios', e),
       data: (services) {
         if (services.isEmpty) {
-          return _emptyBlock(
-            'Esta clínica aún no publica servicios',
-            'Contáctala directamente para agendar.',
+          return KiltoEmptyState(
+            icon: Icons.medical_services_outlined,
+            title: 'Esta clínica aún no publica servicios',
+            subtitle: 'Contáctala directamente para agendar.',
           );
         }
         return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const _StepTitle('Selecciona un servicio',
-                'Elige el tratamiento que necesitas'),
-            const SizedBox(height: 20),
-            ...services.map((s) => _serviceTile(s)),
+            for (final s in services) ...[
+              _SelectableRow(
+                title: s.name,
+                subtitle: (s.description ?? '').isNotEmpty
+                    ? s.description!
+                    : null,
+                trailing: s.price != null ? 'Bs ${s.price}' : null,
+                leading: const Icon(Icons.medical_services_outlined,
+                    size: 18, color: KiltoColors.zinc700),
+                selected: _service?.id == s.id,
+                accent: _accent,
+                onTap: () => setState(() => _service = s),
+              ),
+              const SizedBox(height: 10),
+            ],
           ],
         );
       },
-    );
-  }
-
-  Widget _serviceTile(ServiceCatalogItem s) {
-    final selected = _service?.id == s.id;
-    return GestureDetector(
-      onTap: () => setState(() => _service = s),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: selected
-              ? KiltoColors.teal.withOpacity(0.08)
-              : KiltoColors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: selected ? KiltoColors.teal : KiltoColors.greyMid,
-            width: selected ? 2 : 1,
-          ),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.medical_services_outlined,
-                color: selected
-                    ? KiltoColors.teal
-                    : KiltoColors.navy.withOpacity(0.6)),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(s.name,
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color:
-                            selected ? KiltoColors.teal : KiltoColors.navy,
-                      )),
-                  if (s.description != null && s.description!.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text(s.description!,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontSize: 12,
-                              color: KiltoColors.greyText)),
-                    ),
-                ],
-              ),
-            ),
-            if (s.price != null)
-              Text('Bs ${s.price}',
-                  style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: selected
-                          ? KiltoColors.teal
-                          : KiltoColors.navy)),
-            if (selected) ...[
-              const SizedBox(width: 8),
-              const Icon(Icons.check_circle,
-                  color: KiltoColors.teal, size: 22),
-            ],
-          ],
-        ),
-      ),
     );
   }
 
@@ -228,113 +217,61 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
     final async = ref.watch(staffProvider);
     return async.when(
       loading: () => const Padding(
-        padding: EdgeInsets.all(40),
+        padding: EdgeInsets.symmetric(vertical: 40),
         child: Center(child: CircularProgressIndicator()),
       ),
       error: (e, _) => _errorBlock('No se pudo cargar el equipo', e),
       data: (staff) {
         if (staff.isEmpty) {
-          return _emptyBlock('Sin profesionales disponibles',
-              'Esta clínica aún no ha registrado personal.');
+          return KiltoEmptyState(
+            icon: Icons.people_outline_rounded,
+            title: 'Sin profesionales disponibles',
+            subtitle: 'Esta clínica aún no ha registrado personal.',
+          );
         }
         return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const _StepTitle('Elige tu profesional', 'Quién te atenderá'),
-            const SizedBox(height: 20),
-            ...staff.map((s) => _staffTile(s)),
+            for (final s in staff) ...[
+              _SelectableRow(
+                title: s.name,
+                subtitle: s.role,
+                leading: _StaffAvatar(name: s.name, selected: _staff?.id == s.id, accent: _accent),
+                selected: _staff?.id == s.id,
+                accent: _accent,
+                onTap: () => setState(() {
+                  _staff = s;
+                  _selectedSlot = null;
+                }),
+              ),
+              const SizedBox(height: 10),
+            ],
           ],
         );
       },
     );
   }
 
-  Widget _staffTile(StaffMember s) {
-    final selected = _staff?.id == s.id;
-    final initial = s.name.isNotEmpty ? s.name[0].toUpperCase() : '?';
-    return GestureDetector(
-      onTap: () => setState(() {
-        _staff = s;
-        _selectedSlot = null; // invalidate slot choice
-      }),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: selected
-              ? KiltoColors.teal.withOpacity(0.08)
-              : KiltoColors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: selected ? KiltoColors.teal : KiltoColors.greyMid,
-            width: selected ? 2 : 1,
-          ),
-        ),
-        child: Row(
-          children: [
-            CircleAvatar(
-              radius: 24,
-              backgroundColor: selected
-                  ? KiltoColors.teal
-                  : KiltoColors.navy.withOpacity(0.1),
-              child: Text(initial,
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: selected ? KiltoColors.white : KiltoColors.navy,
-                  )),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(s.name,
-                      style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: KiltoColors.navy)),
-                  if (s.role != null)
-                    Text(s.role!,
-                        style: const TextStyle(
-                            fontSize: 12, color: KiltoColors.greyText)),
-                ],
-              ),
-            ),
-            if (selected)
-              const Icon(Icons.check_circle,
-                  color: KiltoColors.teal, size: 24),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _dateTimeStepReal() {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const _StepTitle('Fecha y hora', 'Elige cuándo quieres tu cita'),
-        const SizedBox(height: 20),
         SizedBox(
-          height: 80,
-          child: ListView.builder(
+          height: 86,
+          child: ListView.separated(
             scrollDirection: Axis.horizontal,
+            padding: EdgeInsets.zero,
             itemCount: _dates.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
             itemBuilder: (_, i) => _dateChip(_dates[i]),
           ),
         ),
         const SizedBox(height: 24),
-        const Text('Horarios disponibles',
-            style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: KiltoColors.navy)),
-        const SizedBox(height: 12),
+        KiltoText.eyebrow('Horarios disponibles'),
+        const SizedBox(height: 10),
         if (_selectedDate == null)
-          const Text('Selecciona una fecha arriba.',
-              style: TextStyle(
-                  fontSize: 12, color: KiltoColors.greyText))
+          KiltoText.body('Selecciona una fecha arriba.',
+              color: KiltoColors.zinc500)
         else
           _availabilityGrid(),
       ],
@@ -357,39 +294,51 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
         _selectedSlot = null;
       }),
       child: Container(
-        width: 58,
-        margin: const EdgeInsets.only(right: 8),
+        width: 62,
         decoration: BoxDecoration(
-          color: selected ? KiltoColors.teal : KiltoColors.white,
-          borderRadius: BorderRadius.circular(14),
+          color: selected ? _accent : KiltoColors.surface,
+          borderRadius: BorderRadius.circular(KiltoRadii.medium),
           border: Border.all(
-              color: selected ? KiltoColors.teal : KiltoColors.greyMid),
+            color: selected ? _accent : KiltoColors.border,
+            width: selected ? 1.5 : 1,
+          ),
+          boxShadow: selected ? KiltoShadows.hero(_accent) : KiltoShadows.card,
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(weekdays[d.weekday - 1],
-                style: TextStyle(
-                  fontSize: 11,
-                  color: selected
-                      ? KiltoColors.white.withOpacity(0.8)
-                      : KiltoColors.greyText,
-                  fontWeight: FontWeight.w500,
-                )),
+            Text(
+              weekdays[d.weekday - 1],
+              style: TextStyle(
+                fontFamily: KiltoFonts.familyHeading,
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.3,
+                color: selected ? Colors.white : KiltoColors.zinc500,
+              ),
+            ),
             const SizedBox(height: 2),
-            Text('${d.day}',
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w700,
-                  color: selected ? KiltoColors.white : KiltoColors.navy,
-                )),
-            Text(months[d.month - 1],
-                style: TextStyle(
-                  fontSize: 10,
-                  color: selected
-                      ? KiltoColors.white.withOpacity(0.8)
-                      : KiltoColors.greyText,
-                )),
+            Text(
+              '${d.day}',
+              style: TextStyle(
+                fontFamily: KiltoFonts.familyHeading,
+                fontSize: 22,
+                fontWeight: FontWeight.w900,
+                height: 1.0,
+                color: selected ? Colors.white : KiltoColors.zinc950,
+              ),
+            ),
+            const SizedBox(height: 1),
+            Text(
+              months[d.month - 1].toUpperCase(),
+              style: TextStyle(
+                fontFamily: KiltoFonts.familyHeading,
+                fontSize: 9,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.5,
+                color: selected ? Colors.white : KiltoColors.zinc500,
+              ),
+            ),
           ],
         ),
       ),
@@ -399,7 +348,6 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
   Widget _availabilityGrid() {
     final date =
         '${_selectedDate!.year}-${_selectedDate!.month.toString().padLeft(2, '0')}-${_selectedDate!.day.toString().padLeft(2, '0')}';
-    // Build a one-off future that we don't cache across dates.
     return FutureBuilder<List<String>>(
       future: ref
           .read(catalogServiceProvider)
@@ -416,11 +364,10 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
         }
         final slots = snap.data ?? const [];
         if (slots.isEmpty) {
-          return const Padding(
-            padding: EdgeInsets.symmetric(vertical: 8),
-            child: Text('No hay horarios disponibles para este día.',
-                style: TextStyle(
-                    fontSize: 13, color: KiltoColors.greyText)),
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: KiltoText.body('No hay horarios disponibles para este día.',
+                color: KiltoColors.zinc500),
           );
         }
         return GridView.builder(
@@ -438,25 +385,25 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
             final selected = _selectedSlot == slot;
             return GestureDetector(
               onTap: () => setState(() => _selectedSlot = slot),
-              child: Container(
+              child: DecoratedBox(
                 decoration: BoxDecoration(
-                  color: selected ? KiltoColors.teal : KiltoColors.white,
-                  borderRadius: BorderRadius.circular(10),
+                  color: selected ? _accent : KiltoColors.surface,
+                  borderRadius: BorderRadius.circular(KiltoRadii.xsmall),
                   border: Border.all(
-                    color: selected
-                        ? KiltoColors.teal
-                        : KiltoColors.greyMid,
+                    color: selected ? _accent : KiltoColors.border,
+                    width: selected ? 1.5 : 1,
                   ),
                 ),
                 child: Center(
-                  child: Text(slot,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: selected
-                            ? KiltoColors.white
-                            : KiltoColors.navy,
-                      )),
+                  child: Text(
+                    slot,
+                    style: TextStyle(
+                      fontFamily: KiltoFonts.familyHeading,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: selected ? Colors.white : KiltoColors.zinc950,
+                    ),
+                  ),
                 ),
               ),
             );
@@ -471,68 +418,44 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
         ? '${_selectedDate!.day}/${_selectedDate!.month.toString().padLeft(2, '0')}/${_selectedDate!.year}'
         : '-';
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const _StepTitle('Confirmar cita', 'Revisa los detalles'),
-        const SizedBox(height: 20),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: KiltoColors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: KiltoColors.greyMid),
-          ),
+        KiltoCard(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
           child: Column(
             children: [
               _summaryRow(Icons.medical_services_outlined, 'Servicio',
                   _service?.name ?? '-'),
-              const Divider(height: 24),
+              const Divider(height: 1, color: KiltoColors.borderLight),
               _summaryRow(Icons.person_outline, 'Profesional',
                   _staff?.name ?? '-'),
-              const Divider(height: 24),
-              _summaryRow(Icons.calendar_today, 'Fecha', dateLabel),
-              const Divider(height: 24),
-              _summaryRow(Icons.access_time, 'Hora', _selectedSlot ?? '-'),
+              const Divider(height: 1, color: KiltoColors.borderLight),
+              _summaryRow(Icons.calendar_today_rounded, 'Fecha', dateLabel),
+              const Divider(height: 1, color: KiltoColors.borderLight),
+              _summaryRow(Icons.access_time_rounded, 'Hora',
+                  _selectedSlot ?? '-'),
               if (_service?.price != null) ...[
-                const Divider(height: 24),
-                _summaryRow(Icons.attach_money, 'Precio',
+                const Divider(height: 1, color: KiltoColors.borderLight),
+                _summaryRow(Icons.attach_money_rounded, 'Precio',
                     'Bs ${_service!.price}'),
               ],
             ],
           ),
         ),
-        const SizedBox(height: 20),
-        const Text(
-          'Notas adicionales (opcional)',
-          style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: KiltoColors.navy),
-        ),
+        const SizedBox(height: 22),
+        KiltoText.eyebrow('Notas (opcional)'),
         const SizedBox(height: 8),
         TextField(
           controller: _notesController,
-          maxLines: 3,
-          decoration: InputDecoration(
+          maxLines: 4,
+          style: const TextStyle(
+            fontFamily: KiltoFonts.familyBody,
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+            color: KiltoColors.zinc950,
+          ),
+          decoration: const InputDecoration(
             hintText: 'Agrega alguna nota para tu profesional...',
-            hintStyle: const TextStyle(
-                fontSize: 13, color: KiltoColors.greyText),
-            filled: true,
-            fillColor: KiltoColors.white,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: KiltoColors.greyMid),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: KiltoColors.greyMid),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide:
-                  const BorderSide(color: KiltoColors.teal, width: 2),
-            ),
           ),
         ),
       ],
@@ -564,10 +487,11 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
       messenger.showSnackBar(
         SnackBar(
           content: const Text('Cita agendada exitosamente'),
-          backgroundColor: KiltoColors.green,
+          backgroundColor: KiltoColors.success,
           behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(KiltoRadii.small),
+          ),
         ),
       );
       context.go('/client/appointments');
@@ -577,129 +501,38 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
     }
   }
 
-  // =====================================================================
-  // Shared UI
-  // =====================================================================
-  Widget _buildProgressBar() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      child: Row(
-        children: List.generate(4, (i) {
-          return Expanded(
-            child: Container(
-              height: 4,
-              margin: EdgeInsets.only(right: i < 3 ? 4 : 0),
+  Widget _summaryRow(IconData icon, String label, String value) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Row(
+          children: [
+            Container(
+              width: 30,
+              height: 30,
               decoration: BoxDecoration(
-                color: i <= _currentStep
-                    ? KiltoColors.teal
-                    : KiltoColors.greyMid,
-                borderRadius: BorderRadius.circular(2),
+                color: KiltoColors.zinc100,
+                borderRadius: BorderRadius.circular(KiltoRadii.xsmall),
               ),
+              child: Icon(icon, size: 14, color: KiltoColors.zinc700),
             ),
-          );
-        }),
-      ),
-    );
-  }
-
-  Widget _buildFooterButton({
-    required String label,
-    required VoidCallback? onPressed,
-    bool loading = false,
-  }) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-      decoration: const BoxDecoration(
-        color: KiltoColors.white,
-        border: Border(top: BorderSide(color: KiltoColors.greyMid)),
-      ),
-      child: SizedBox(
-        width: double.infinity,
-        height: 50,
-        child: ElevatedButton(
-          onPressed: onPressed,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Theme.of(context).colorScheme.primary,
-            foregroundColor: KiltoColors.white,
-            disabledBackgroundColor: KiltoColors.greyMid,
-            disabledForegroundColor: KiltoColors.greyText,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14)),
-          ),
-          child: loading
-              ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white),
-                )
-              : Text(label,
-                  style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.w700)),
-        ),
-      ),
-    );
-  }
-
-  Widget _summaryRow(IconData icon, String label, String value) => Row(
-        children: [
-          Icon(icon, size: 18, color: KiltoColors.teal),
-          const SizedBox(width: 10),
-          Text(label,
-              style: const TextStyle(
-                  fontSize: 13, color: KiltoColors.greyText)),
-          const Spacer(),
-          Flexible(
-            child: Text(value,
-                textAlign: TextAlign.end,
-                style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: KiltoColors.navy)),
-          ),
-        ],
-      );
-
-  Widget _errorBlock(String title, Object? err) => Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            const Icon(Icons.error_outline,
-                size: 40, color: KiltoColors.greyText),
-            const SizedBox(height: 8),
-            Text(title,
-                style: const TextStyle(
-                    fontSize: 14, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 4),
-            Text('$err',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    fontSize: 12, color: KiltoColors.greyText)),
+            const SizedBox(width: 10),
+            KiltoText.label(label),
+            const Spacer(),
+            Flexible(
+              child: KiltoText.strong(value, align: TextAlign.end, size: 13),
+            ),
           ],
         ),
       );
 
-  Widget _emptyBlock(String title, String subtitle) => Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          children: [
-            Text(title,
-                style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: KiltoColors.navy)),
-            const SizedBox(height: 4),
-            Text(subtitle,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    fontSize: 13, color: KiltoColors.greyText)),
-          ],
-        ),
+  Widget _errorBlock(String title, Object? err) => KiltoEmptyState(
+        icon: Icons.error_outline_rounded,
+        title: title,
+        subtitle: '$err',
       );
 
-  // =====================================================================
-  // Demo mode (unchanged legacy hardcoded flow)
-  // =====================================================================
+  // ===================================================================
+  // Demo path (unchanged data, restyled)
+  // ===================================================================
   int? _demoServiceIdx;
   int? _demoDoctorIdx;
   int? _demoTimeIdx;
@@ -725,173 +558,269 @@ class _BookAppointmentScreenState extends ConsumerState<BookAppointmentScreen> {
     }
   }
 
-  Widget _buildDemo() {
-    return Column(
-      children: [
-        _buildProgressBar(),
-        Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: _buildDemoContent(),
-          ),
-        ),
-        _buildFooterButton(
-          label: _currentStep == 3 ? 'Confirmar cita' : 'Continuar',
-          onPressed: _demoCanProceed
-              ? () {
-                  if (_currentStep == 3) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Cita agendada (demo)')),
-                    );
-                    context.go('/client/appointments');
-                  } else {
-                    _next();
-                  }
-                }
-              : null,
-        ),
-      ],
-    );
-  }
-
   Widget _buildDemoContent() {
     switch (_currentStep) {
       case 0:
         return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const _StepTitle('Selecciona un servicio',
-                'Elige el tratamiento que necesitas'),
-            const SizedBox(height: 20),
-            ...List.generate(_demoServices.length, (i) {
-              final s = _demoServices[i];
-              final sel = _demoServiceIdx == i;
-              return GestureDetector(
+            for (var i = 0; i < _demoServices.length; i++) ...[
+              _SelectableRow(
+                title: _demoServices[i]['name'] ?? '',
+                trailing: _demoServices[i]['price'],
+                leading: const Icon(Icons.medical_services_outlined,
+                    size: 18, color: KiltoColors.zinc700),
+                selected: _demoServiceIdx == i,
+                accent: _accent,
                 onTap: () => setState(() => _demoServiceIdx = i),
-                child: Container(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: sel
-                        ? KiltoColors.teal.withOpacity(0.08)
-                        : KiltoColors.white,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color:
-                          sel ? KiltoColors.teal : KiltoColors.greyMid,
-                      width: sel ? 2 : 1,
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.medical_services_outlined),
-                      const SizedBox(width: 12),
-                      Expanded(child: Text(s['name'] ?? '')),
-                      Text(s['price'] ?? ''),
-                    ],
-                  ),
-                ),
-              );
-            }),
+              ),
+              const SizedBox(height: 10),
+            ],
           ],
         );
       case 1:
         return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const _StepTitle('Elige tu profesional', ''),
-            const SizedBox(height: 20),
-            ...List.generate(_demoDoctors.length, (i) {
-              final d = _demoDoctors[i];
-              final sel = _demoDoctorIdx == i;
-              return GestureDetector(
+            for (var i = 0; i < _demoDoctors.length; i++) ...[
+              _SelectableRow(
+                title: _demoDoctors[i]['name'] ?? '',
+                leading: _StaffAvatar(
+                    name: _demoDoctors[i]['name'] ?? '?',
+                    selected: _demoDoctorIdx == i,
+                    accent: _accent),
+                selected: _demoDoctorIdx == i,
+                accent: _accent,
                 onTap: () => setState(() => _demoDoctorIdx = i),
-                child: Container(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: sel
-                        ? KiltoColors.teal.withOpacity(0.08)
-                        : KiltoColors.white,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color:
-                          sel ? KiltoColors.teal : KiltoColors.greyMid,
-                      width: sel ? 2 : 1,
-                    ),
-                  ),
-                  child: Text(d['name'] ?? ''),
-                ),
-              );
-            }),
+              ),
+              const SizedBox(height: 10),
+            ],
           ],
         );
       case 2:
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const _StepTitle('Fecha y hora', ''),
-            const SizedBox(height: 20),
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate:
-                  const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 4,
-                      crossAxisSpacing: 8,
-                      mainAxisSpacing: 8,
-                      childAspectRatio: 2.2),
-              itemCount: _demoTimes.length,
-              itemBuilder: (_, i) {
-                final sel = _demoTimeIdx == i;
-                return GestureDetector(
-                  onTap: () => setState(() => _demoTimeIdx = i),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color:
-                          sel ? KiltoColors.teal : KiltoColors.white,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                          color: sel
-                              ? KiltoColors.teal
-                              : KiltoColors.greyMid),
-                    ),
-                    child: Center(child: Text(_demoTimes[i])),
+        return GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 4,
+            crossAxisSpacing: 8,
+            mainAxisSpacing: 8,
+            childAspectRatio: 2.2,
+          ),
+          itemCount: _demoTimes.length,
+          itemBuilder: (_, i) {
+            final sel = _demoTimeIdx == i;
+            return GestureDetector(
+              onTap: () => setState(() => _demoTimeIdx = i),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: sel ? _accent : KiltoColors.surface,
+                  borderRadius: BorderRadius.circular(KiltoRadii.xsmall),
+                  border: Border.all(
+                    color: sel ? _accent : KiltoColors.border,
+                    width: sel ? 1.5 : 1,
                   ),
-                );
-              },
-            ),
-          ],
+                ),
+                child: Center(
+                  child: Text(
+                    _demoTimes[i],
+                    style: TextStyle(
+                      fontFamily: KiltoFonts.familyHeading,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: sel ? Colors.white : KiltoColors.zinc950,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
         );
       case 3:
-        return const _StepTitle('Confirmar cita (demo)',
-            'Los datos no se enviarán al servidor en modo demo.');
+        return KiltoCard(
+          padding: const EdgeInsets.all(18),
+          child: KiltoText.body(
+            'Los datos no se enviarán al servidor en modo demo.',
+            color: KiltoColors.zinc500,
+          ),
+        );
       default:
         return const SizedBox();
     }
   }
 }
 
-class _StepTitle extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  const _StepTitle(this.title, this.subtitle);
+class _ProgressBar extends StatelessWidget {
+  final int currentStep;
+  final Color accent;
+  const _ProgressBar({required this.currentStep, required this.accent});
 
   @override
-  Widget build(BuildContext context) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title,
-              style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                  color: KiltoColors.navy)),
-          if (subtitle.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text(subtitle,
-                style: const TextStyle(
-                    fontSize: 13, color: KiltoColors.greyText)),
-          ],
-        ],
-      );
+  Widget build(BuildContext context) {
+    return Row(
+      children: List.generate(4, (i) {
+        return Expanded(
+          child: Container(
+            height: 4,
+            margin: EdgeInsets.only(right: i < 3 ? 4 : 0),
+            decoration: BoxDecoration(
+              color: i <= currentStep ? accent : KiltoColors.zinc200,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+        );
+      }),
+    );
+  }
+}
+
+class _Footer extends StatelessWidget {
+  final String label;
+  final VoidCallback? onPressed;
+  final bool loading;
+
+  const _Footer({
+    required this.label,
+    required this.onPressed,
+    this.loading = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+      decoration: const BoxDecoration(
+        color: KiltoColors.surface,
+        border: Border(top: BorderSide(color: KiltoColors.border)),
+      ),
+      child: SizedBox(
+        width: double.infinity,
+        height: 52,
+        child: ElevatedButton(
+          onPressed: onPressed,
+          child: loading
+              ? const SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    color: KiltoColors.onBrand,
+                  ),
+                )
+              : Text(label),
+        ),
+      ),
+    );
+  }
+}
+
+class _SelectableRow extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final String? trailing;
+  final Widget leading;
+  final bool selected;
+  final Color accent;
+  final VoidCallback onTap;
+
+  const _SelectableRow({
+    required this.title,
+    required this.leading,
+    required this.selected,
+    required this.accent,
+    required this.onTap,
+    this.subtitle,
+    this.trailing,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = BorderRadius.circular(KiltoRadii.medium);
+    return Material(
+      color: Colors.transparent,
+      borderRadius: radius,
+      child: InkWell(
+        borderRadius: radius,
+        onTap: onTap,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: selected
+                ? Color.alphaBlend(accent.withValues(alpha: 0.08), Colors.white)
+                : KiltoColors.surface,
+            borderRadius: radius,
+            border: Border.all(
+              color: selected ? accent : KiltoColors.border,
+              width: selected ? 1.5 : 1,
+            ),
+            boxShadow: selected ? null : KiltoShadows.card,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              children: [
+                leading,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      KiltoText.strong(title, size: 14),
+                      if (subtitle != null && subtitle!.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        KiltoText.label(subtitle!,
+                            color: KiltoColors.zinc500),
+                      ],
+                    ],
+                  ),
+                ),
+                if (trailing != null) ...[
+                  const SizedBox(width: 8),
+                  KiltoText.strong(trailing!, size: 13, color: KiltoColors.zinc700),
+                ],
+                if (selected) ...[
+                  const SizedBox(width: 8),
+                  Icon(Icons.check_circle_rounded, color: accent, size: 20),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StaffAvatar extends StatelessWidget {
+  final String name;
+  final bool selected;
+  final Color accent;
+  const _StaffAvatar(
+      {required this.name, required this.selected, required this.accent});
+
+  @override
+  Widget build(BuildContext context) {
+    final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
+    final bg = selected ? accent : KiltoColors.zinc100;
+    final fg = selected
+        ? (accent.computeLuminance() > 0.55 ? Colors.black : Colors.white)
+        : KiltoColors.zinc900;
+    return Container(
+      width: 38,
+      height: 38,
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(KiltoRadii.xsmall),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        initial,
+        style: TextStyle(
+          fontFamily: KiltoFonts.familyHeading,
+          fontSize: 14,
+          fontWeight: FontWeight.w900,
+          color: fg,
+        ),
+      ),
+    );
+  }
 }

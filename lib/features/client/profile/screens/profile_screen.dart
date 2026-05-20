@@ -1,14 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../../../config/theme.dart';
-import '../../../../config/demo_mode.dart';
+import '../../../../config/clinic_theme.dart';
 import '../../../../config/demo_data.dart';
+import '../../../../config/demo_mode.dart';
 import '../../../../config/feature_flags.dart';
+import '../../../../config/theme.dart';
 import '../../../../core/api/v1/models.dart';
 import '../../../../core/api/v1/v1_providers.dart';
 import '../../../../core/auth/auth_providers.dart';
 import '../../../../core/auth/auth_state.dart';
+import '../../../../core/widgets/kilto_card.dart';
+import '../../../../core/widgets/kilto_empty_state.dart';
+import '../../../../core/widgets/kilto_section_header.dart';
+import '../../../../core/widgets/kilto_text.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -25,98 +30,276 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: KiltoColors.grey,
-      appBar: AppBar(
-        title: const Text('Mi perfil'),
-        centerTitle: false,
+      backgroundColor: KiltoColors.bg,
+      body: SafeArea(
+        child: kDemoMode ? _buildDemo() : _buildReal(),
       ),
-      body: kDemoMode ? _buildDemo() : _buildReal(),
     );
   }
 
-  // =====================================================================
-  // Real API
-  // =====================================================================
+  // ── Real API ────────────────────────────────────────────────────────
   Widget _buildReal() {
     final async = ref.watch(profileProvider);
     return async.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => _errorState(e.toString()),
+      error: (e, _) => KiltoEmptyState(
+        icon: Icons.error_outline_rounded,
+        title: 'No se pudo cargar el perfil',
+        subtitle: e.toString(),
+        actionLabel: 'Reintentar',
+        onAction: () => ref.invalidate(profileProvider),
+      ),
       data: (profile) => RefreshIndicator(
         onRefresh: () async => ref.invalidate(profileProvider),
-        child: SingleChildScrollView(
+        child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              _buildHeaderReal(profile.personal),
-              const SizedBox(height: 16),
-              _buildPersonalCardReal(profile.personal),
-              const SizedBox(height: 12),
-              _buildMedicalCardReal(profile.medical),
-              const SizedBox(height: 12),
-              _buildNotificationsCard(),
-              const SizedBox(height: 20),
-              _logoutButton(),
-              const SizedBox(height: 24),
-            ],
-          ),
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          children: [
+            _Header(profile: profile.personal),
+            const SizedBox(height: 28),
+            const KiltoSectionHeader('Información personal'),
+            _personalCard(profile.personal),
+            const SizedBox(height: 20),
+            const KiltoSectionHeader('Información médica'),
+            _medicalCard(profile.medical),
+            const SizedBox(height: 20),
+            const KiltoSectionHeader('Preferencias de notificaciones'),
+            _notificationsCard(),
+            const SizedBox(height: 24),
+            _accountActions(),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildHeaderReal(PersonalInfo p) {
-    final initials = _initialsFrom(p.name);
-    return _profileHeader(
-      name: p.name.isEmpty ? 'Mi perfil' : p.name,
-      email: p.email ?? '',
-      phone: p.phone ?? '',
-      initials: initials,
-      avatarUrl: p.avatarUrl,
+  Widget _personalCard(PersonalInfo p) {
+    return KiltoCard(
+      padding: EdgeInsets.zero,
+      child: Column(
+        children: [
+          _editHeader('Datos personales', () => _editPersonal(p)),
+          const Divider(height: 1, color: KiltoColors.borderLight),
+          _row('Fecha de nacimiento', p.dateOfBirth ?? '—'),
+          _row('CI', p.nationalId ?? '—'),
+          _row('Teléfono', p.phone ?? '—'),
+          _row('Dirección', p.address ?? '—'),
+          _row('Ciudad', p.city ?? '—', last: true),
+        ],
+      ),
     );
   }
 
-  Widget _buildPersonalCardReal(PersonalInfo p) {
-    return _infoCardWithEdit(
-      title: 'Información personal',
-      icon: Icons.person_outline,
-      onEdit: () => _editPersonal(p),
-      items: [
-        _InfoRow(
-            label: 'Fecha de nacimiento', value: p.dateOfBirth ?? '—'),
-        _InfoRow(label: 'CI', value: p.nationalId ?? '—'),
-        _InfoRow(label: 'Teléfono', value: p.phone ?? '—'),
-        _InfoRow(label: 'Dirección', value: p.address ?? '—'),
-        _InfoRow(label: 'Ciudad', value: p.city ?? '—'),
+  Widget _medicalCard(MedicalInfo? m) {
+    return KiltoCard(
+      padding: EdgeInsets.zero,
+      child: Column(
+        children: [
+          _editHeader('Salud', () => _editMedical(m)),
+          const Divider(height: 1, color: KiltoColors.borderLight),
+          _row('Tipo de sangre', m?.bloodType ?? '—'),
+          _row('Alergias', m?.allergies ?? 'Ninguna'),
+          _row('Medicamentos', m?.medications ?? 'Ninguno'),
+          _row('Condiciones', m?.conditions ?? 'Ninguna'),
+          _row('Contacto emergencia', m?.emergencyContactName ?? '—'),
+          _row('Teléfono emergencia', m?.emergencyContactPhone ?? '—',
+              last: true),
+        ],
+      ),
+    );
+  }
+
+  // ── Demo path (just for offline preview) ────────────────────────────
+  Widget _buildDemo() {
+    final p = DemoData.profile['personal'] as Map<String, dynamic>;
+    final m = DemoData.profile['medical'] as Map<String, dynamic>;
+    final personal = PersonalInfo(
+      name: DemoData.user['name'] as String,
+      firstName: (DemoData.user['name'] as String).split(' ').first,
+      email: DemoData.user['email'] as String?,
+      phone: DemoData.user['phone'] as String?,
+      dateOfBirth: p['date_of_birth'] as String?,
+      nationalId: p['national_id'] as String?,
+      address: p['address'] as String?,
+      city: p['city'] as String?,
+    );
+    final medical = MedicalInfo(
+      bloodType: m['blood_type'] as String?,
+      allergies: m['allergies'] as String?,
+      medications: m['medications'] as String?,
+      conditions: m['conditions'] as String?,
+    );
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+      children: [
+        _Header(profile: personal),
+        const SizedBox(height: 28),
+        const KiltoSectionHeader('Información personal'),
+        _personalCard(personal),
+        const SizedBox(height: 20),
+        const KiltoSectionHeader('Información médica'),
+        _medicalCard(medical),
+        const SizedBox(height: 20),
+        const KiltoSectionHeader('Preferencias de notificaciones'),
+        _notificationsCard(),
+        const SizedBox(height: 24),
+        _accountActions(),
       ],
     );
   }
 
-  Widget _buildMedicalCardReal(MedicalInfo? m) {
-    return _infoCardWithEdit(
-      title: 'Información médica',
-      icon: Icons.medical_information_outlined,
-      onEdit: () => _editMedical(m),
-      items: [
-        _InfoRow(label: 'Tipo de sangre', value: m?.bloodType ?? '—'),
-        _InfoRow(label: 'Alergias', value: m?.allergies ?? 'Ninguna'),
-        _InfoRow(label: 'Medicamentos', value: m?.medications ?? 'Ninguno'),
-        _InfoRow(label: 'Condiciones', value: m?.conditions ?? 'Ninguna'),
-        _InfoRow(
-            label: 'Contacto emergencia',
-            value: m?.emergencyContactName ?? '—'),
-        _InfoRow(
-            label: 'Teléfono emergencia',
-            value: m?.emergencyContactPhone ?? '—'),
+  // ── Shared rows / cards ────────────────────────────────────────────
+  Widget _editHeader(String title, VoidCallback onEdit) => Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+        child: Row(
+          children: [
+            Expanded(child: KiltoText.strong(title, size: 13)),
+            TextButton.icon(
+              onPressed: onEdit,
+              icon: const Icon(Icons.edit_outlined, size: 14),
+              label: const Text('Editar'),
+              style: TextButton.styleFrom(
+                foregroundColor: KiltoColors.zinc950,
+                textStyle: const TextStyle(
+                  fontFamily: KiltoFonts.familyHeading,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+
+  Widget _row(String label, String value, {bool last = false}) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(width: 140, child: KiltoText.label(label)),
+              Expanded(
+                child: KiltoText.body(value,
+                    align: TextAlign.end, color: KiltoColors.zinc950),
+              ),
+            ],
+          ),
+        ),
+        if (!last)
+          const Divider(height: 1, color: KiltoColors.borderLight),
       ],
     );
   }
 
+  Widget _notificationsCard() {
+    return KiltoCard(
+      padding: EdgeInsets.zero,
+      child: Column(
+        children: [
+          _toggleRow('Recordatorios de citas', _appointmentReminders,
+              (v) => setState(() => _appointmentReminders = v)),
+          const Divider(height: 1, color: KiltoColors.borderLight),
+          _toggleRow('Promociones', _promotions,
+              (v) => setState(() => _promotions = v)),
+          const Divider(height: 1, color: KiltoColors.borderLight),
+          _toggleRow('Nuevos documentos', _newDocuments,
+              (v) => setState(() => _newDocuments = v),
+              last: true),
+        ],
+      ),
+    );
+  }
+
+  Widget _toggleRow(String label, bool value, ValueChanged<bool> onChanged,
+      {bool last = false}) {
+    final accent =
+        Theme.of(context).extension<ClinicAccentExtension>()?.accent ??
+            KiltoColors.brandPrimary;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(child: KiltoText.body(label, color: KiltoColors.zinc950)),
+          Switch(
+            value: value,
+            onChanged: onChanged,
+            activeColor: accent,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _accountActions() {
+    final showSwitch = kCentralAuth && !kDemoMode;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (showSwitch) ...[
+          OutlinedButton.icon(
+            onPressed: _onSwitchClinic,
+            icon: const Icon(Icons.swap_horiz_rounded, size: 16),
+            label: const Text('Cambiar de clínica'),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              textStyle: const TextStyle(
+                fontFamily: KiltoFonts.familyHeading,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+        ],
+        ElevatedButton.icon(
+          onPressed: () async {
+            if (kCentralAuth && !kDemoMode) {
+              await ref.read(accountProvider.notifier).logout();
+            } else if (kDemoMode) {
+              context.go('/login');
+            } else {
+              ref.read(authStateProvider.notifier).logout();
+            }
+          },
+          icon: const Icon(Icons.logout_rounded, size: 16),
+          label: const Text('Cerrar sesión de Kilto'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: KiltoColors.errorLight,
+            foregroundColor: KiltoColors.error,
+            iconColor: KiltoColors.error,
+            elevation: 0,
+            shadowColor: Colors.transparent,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(KiltoRadii.medium),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _onSwitchClinic() async {
+    await ref.read(tenantSessionProvider.notifier).leave();
+    if (!mounted) return;
+    context.go('/clinics');
+  }
+
+  // ── Edit sheets ────────────────────────────────────────────────────
   Future<void> _editPersonal(PersonalInfo p) async {
     final updated = await showModalBottomSheet<_PersonalDraft>(
       context: context,
       isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.vertical(top: Radius.circular(KiltoRadii.xlarge)),
+      ),
       builder: (_) => _PersonalEditSheet(initial: p),
     );
     if (updated == null || !mounted) return;
@@ -132,7 +315,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             city: updated.city,
           );
       ref.invalidate(profileProvider);
-      messenger.showSnackBar(const SnackBar(content: Text('Perfil actualizado')));
+      messenger
+          .showSnackBar(const SnackBar(content: Text('Perfil actualizado')));
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('Error: $e')));
     }
@@ -142,6 +326,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final updated = await showModalBottomSheet<_MedicalDraft>(
       context: context,
       isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.vertical(top: Radius.circular(KiltoRadii.xlarge)),
+      ),
       builder: (_) => _MedicalEditSheet(initial: m),
     );
     if (updated == null || !mounted) return;
@@ -162,391 +350,71 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       messenger.showSnackBar(SnackBar(content: Text('Error: $e')));
     }
   }
+}
 
-  // =====================================================================
-  // Demo (legacy)
-  // =====================================================================
-  Widget _buildDemo() {
-    final userName = DemoData.user['name'] as String;
-    final userEmail = DemoData.user['email'] as String;
-    final userPhone = DemoData.user['phone'] as String;
-    final initials = DemoData.user['initials'] as String;
-    final personal = DemoData.profile['personal'] as Map<String, dynamic>;
-    final medical = DemoData.profile['medical'] as Map<String, dynamic>;
+class _Header extends StatelessWidget {
+  final PersonalInfo profile;
+  const _Header({required this.profile});
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [
-          _profileHeader(
-              name: userName,
-              email: userEmail,
-              phone: userPhone,
-              initials: initials),
-          const SizedBox(height: 16),
-          _infoCard(
-            title: 'Información personal',
-            icon: Icons.person_outline,
-            items: [
-              _InfoRow(
-                  label: 'Fecha de nacimiento',
-                  value: personal['date_of_birth'] as String),
-              _InfoRow(label: 'CI', value: personal['national_id'] as String),
-              _InfoRow(label: 'Dirección', value: personal['address'] as String),
-              _InfoRow(label: 'Ciudad', value: personal['city'] as String),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _infoCard(
-            title: 'Información médica',
-            icon: Icons.medical_information_outlined,
-            items: [
-              _InfoRow(label: 'Tipo de sangre', value: medical['blood_type'] as String),
-              _InfoRow(label: 'Alergias', value: medical['allergies'] as String),
-              _InfoRow(label: 'Medicamentos', value: medical['medications'] as String),
-              _InfoRow(label: 'Condiciones', value: medical['conditions'] as String),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _buildNotificationsCard(),
-          const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: () => context.go('/clinic/dashboard'),
-              icon: const Icon(Icons.swap_horiz_rounded, size: 18),
-              label: const Text('Cambiar a vista Clínica'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: KiltoColors.navy,
-                foregroundColor: KiltoColors.white,
-                elevation: 0,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          _logoutButton(),
-          const SizedBox(height: 24),
-        ],
-      ),
-    );
-  }
-
-  // =====================================================================
-  // Shared widgets
-  // =====================================================================
-  Widget _profileHeader({
-    required String name,
-    required String email,
-    required String phone,
-    required String initials,
-    String? avatarUrl,
-  }) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: KiltoColors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: KiltoColors.greyMid),
-      ),
-      child: Column(
-        children: [
-          CircleAvatar(
-            radius: 38,
-            backgroundColor: Theme.of(context).colorScheme.primary,
-            backgroundImage:
-                avatarUrl != null ? NetworkImage(avatarUrl) : null,
-            child: avatarUrl == null
-                ? Text(initials,
-                    style: const TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w700,
-                        color: KiltoColors.white))
-                : null,
-          ),
-          const SizedBox(height: 12),
-          Text(name,
-              style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                  color: KiltoColors.navy)),
-          if (email.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text(email,
-                style: const TextStyle(
-                    fontSize: 13, color: KiltoColors.greyText)),
-          ],
-          if (phone.isNotEmpty) ...[
-            const SizedBox(height: 2),
-            Text(phone,
-                style: const TextStyle(
-                    fontSize: 13, color: KiltoColors.greyText)),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _infoCard({
-    required String title,
-    required IconData icon,
-    required List<_InfoRow> items,
-  }) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: KiltoColors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: KiltoColors.greyMid),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, size: 18, color: KiltoColors.teal),
-              const SizedBox(width: 8),
-              Text(title,
-                  style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: KiltoColors.navy)),
-            ],
-          ),
-          const SizedBox(height: 14),
-          ...items.map(_rowItem),
-        ],
-      ),
-    );
-  }
-
-  Widget _infoCardWithEdit({
-    required String title,
-    required IconData icon,
-    required VoidCallback onEdit,
-    required List<_InfoRow> items,
-  }) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: KiltoColors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: KiltoColors.greyMid),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, size: 18, color: KiltoColors.teal),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(title,
-                    style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: KiltoColors.navy)),
-              ),
-              IconButton(
-                onPressed: onEdit,
-                icon: const Icon(Icons.edit_outlined,
-                    size: 18, color: KiltoColors.teal),
-                constraints:
-                    const BoxConstraints(minWidth: 32, minHeight: 32),
-                padding: EdgeInsets.zero,
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          ...items.map(_rowItem),
-        ],
-      ),
-    );
-  }
-
-  Widget _rowItem(_InfoRow item) => Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 140,
-              child: Text(item.label,
-                  style: const TextStyle(
-                      fontSize: 13, color: KiltoColors.greyText)),
-            ),
-            Expanded(
-              child: Text(item.value,
-                  textAlign: TextAlign.end,
-                  style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: KiltoColors.navy)),
-            ),
-          ],
-        ),
-      );
-
-  Widget _buildNotificationsCard() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: KiltoColors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: KiltoColors.greyMid),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(
-            children: [
-              Icon(Icons.notifications_outlined,
-                  size: 18, color: KiltoColors.teal),
-              SizedBox(width: 8),
-              Text('Notificaciones',
-                  style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: KiltoColors.navy)),
-            ],
-          ),
-          const SizedBox(height: 8),
-          _toggleRow('Recordatorios de citas', _appointmentReminders,
-              (v) => setState(() => _appointmentReminders = v)),
-          _toggleRow('Promociones', _promotions,
-              (v) => setState(() => _promotions = v)),
-          _toggleRow('Nuevos documentos', _newDocuments,
-              (v) => setState(() => _newDocuments = v)),
-        ],
-      ),
-    );
-  }
-
-  Widget _toggleRow(String label, bool value, ValueChanged<bool> onChanged) =>
-      Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(label,
-                style: const TextStyle(
-                    fontSize: 13, color: KiltoColors.navy)),
-            SizedBox(
-              height: 28,
-              child: Switch(
-                value: value,
-                onChanged: onChanged,
-                activeColor: Theme.of(context).colorScheme.primary,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-            ),
-          ],
-        ),
-      );
-
-  Widget _logoutButton() {
-    final showSwitchClinic = kCentralAuth && !kDemoMode;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (showSwitchClinic) ...[
-          OutlinedButton.icon(
-            onPressed: _onSwitchClinic,
-            icon: const Icon(Icons.swap_horiz_rounded, size: 18),
-            label: const Text('Cambiar de clínica'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: KiltoColors.navy,
-              side: const BorderSide(color: KiltoColors.greyMid),
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-        ],
-        ElevatedButton.icon(
-          onPressed: () async {
-            if (kCentralAuth && !kDemoMode) {
-              await ref.read(accountProvider.notifier).logout();
-            } else if (kDemoMode) {
-              context.go('/login');
-            } else {
-              ref.read(authStateProvider.notifier).logout();
-            }
-          },
-          icon: const Icon(Icons.logout, size: 18),
-          label: const Text('Cerrar sesión de Kilto'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: KiltoColors.redLight,
-            foregroundColor: KiltoColors.red,
-            iconColor: KiltoColors.red,
-            elevation: 0,
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// Leaves the current clinic's tenant session without logging out of the
-  /// Kilto account. Bounces back to the clinic selector so the user can pick
-  /// another clinic or add a new one.
-  Future<void> _onSwitchClinic() async {
-    await ref.read(tenantSessionProvider.notifier).leave();
-    if (!mounted) return;
-    context.go('/clinics');
-  }
-
-  Widget _errorState(String msg) => Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.error_outline,
-                size: 48, color: KiltoColors.greyText),
-            const SizedBox(height: 12),
-            const Text('No se pudo cargar el perfil',
-                style: TextStyle(
-                    fontSize: 15, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 6),
-            Text(msg,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    fontSize: 12, color: KiltoColors.greyText)),
-            const SizedBox(height: 16),
-            OutlinedButton(
-              onPressed: () => ref.invalidate(profileProvider),
-              child: const Text('Reintentar'),
-            ),
-          ],
-        ),
-      );
-
-  String _initialsFrom(String name) {
-    final parts = name.trim().split(' ').where((p) => p.isNotEmpty).toList();
+  String get _initials {
+    final parts =
+        profile.name.trim().split(' ').where((p) => p.isNotEmpty).toList();
     if (parts.length >= 2) {
       return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
     }
     if (parts.isNotEmpty) return parts[0][0].toUpperCase();
     return 'U';
   }
-}
 
-class _InfoRow {
-  final String label;
-  final String value;
-  _InfoRow({required this.label, required this.value});
+  @override
+  Widget build(BuildContext context) {
+    final accent =
+        Theme.of(context).extension<ClinicAccentExtension>()?.accent ??
+            KiltoColors.brandPrimary;
+    final fg = accent.computeLuminance() > 0.55 ? Colors.black : Colors.white;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Column(
+        children: [
+          Container(
+            width: 84,
+            height: 84,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  accent,
+                  Color.alphaBlend(
+                      Colors.white.withValues(alpha: 0.14), accent),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(KiltoRadii.large),
+              boxShadow: KiltoShadows.hero(accent),
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              _initials,
+              style: TextStyle(
+                fontFamily: KiltoFonts.familyHeading,
+                fontSize: 30,
+                fontWeight: FontWeight.w900,
+                color: fg,
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          KiltoText.h2(profile.name.isEmpty ? 'Mi perfil' : profile.name,
+              align: TextAlign.center),
+          if (profile.email != null && profile.email!.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            KiltoText.body(profile.email!, color: KiltoColors.zinc500),
+          ],
+        ],
+      ),
+    );
+  }
 }
 
 // =======================================================================
@@ -613,7 +481,7 @@ class _PersonalEditSheetState extends State<_PersonalEditSheet> {
       padding: EdgeInsets.only(
         left: 20,
         right: 20,
-        top: 16,
+        top: 8,
         bottom: MediaQuery.of(context).viewInsets.bottom + 16,
       ),
       child: SingleChildScrollView(
@@ -621,20 +489,26 @@ class _PersonalEditSheetState extends State<_PersonalEditSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('Editar información personal',
-                style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                    color: KiltoColors.navy)),
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: KiltoColors.zinc300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            KiltoText.h3('Editar información personal'),
             const SizedBox(height: 16),
-            _field(_firstName, 'Nombre'),
-            _field(_lastName, 'Apellido'),
-            _field(_phone, 'Teléfono',
-                keyboardType: TextInputType.phone),
-            _field(_dob, 'Fecha de nacimiento (YYYY-MM-DD)'),
+            _field(_firstName, 'NOMBRE'),
+            _field(_lastName, 'APELLIDO'),
+            _field(_phone, 'TELÉFONO', keyboardType: TextInputType.phone),
+            _field(_dob, 'FECHA DE NACIMIENTO (YYYY-MM-DD)'),
             _field(_ci, 'CI'),
-            _field(_address, 'Dirección'),
-            _field(_city, 'Ciudad'),
+            _field(_address, 'DIRECCIÓN'),
+            _field(_city, 'CIUDAD'),
             const SizedBox(height: 16),
             Row(
               children: [
@@ -659,10 +533,6 @@ class _PersonalEditSheetState extends State<_PersonalEditSheet> {
                         city: _nullIfEmpty(_city.text),
                       ),
                     ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Theme.of(context).colorScheme.primary,
-                      foregroundColor: KiltoColors.white,
-                    ),
                     child: const Text('Guardar'),
                   ),
                 ),
@@ -678,15 +548,22 @@ class _PersonalEditSheetState extends State<_PersonalEditSheet> {
       {TextInputType? keyboardType}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
-      child: TextField(
-        controller: c,
-        keyboardType: keyboardType,
-        decoration: InputDecoration(
-          labelText: label,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          KiltoText.eyebrow(label),
+          const SizedBox(height: 6),
+          TextField(
+            controller: c,
+            keyboardType: keyboardType,
+            style: const TextStyle(
+              fontFamily: KiltoFonts.familyBody,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: KiltoColors.zinc950,
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -735,8 +612,8 @@ class _MedicalEditSheetState extends State<_MedicalEditSheet> {
       TextEditingController(text: widget.initial?.conditions ?? '');
   late final _emergencyName =
       TextEditingController(text: widget.initial?.emergencyContactName ?? '');
-  late final _emergencyPhone =
-      TextEditingController(text: widget.initial?.emergencyContactPhone ?? '');
+  late final _emergencyPhone = TextEditingController(
+      text: widget.initial?.emergencyContactPhone ?? '');
 
   @override
   void dispose() {
@@ -755,7 +632,7 @@ class _MedicalEditSheetState extends State<_MedicalEditSheet> {
       padding: EdgeInsets.only(
         left: 20,
         right: 20,
-        top: 16,
+        top: 8,
         bottom: MediaQuery.of(context).viewInsets.bottom + 16,
       ),
       child: SingleChildScrollView(
@@ -763,18 +640,25 @@ class _MedicalEditSheetState extends State<_MedicalEditSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('Editar información médica',
-                style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                    color: KiltoColors.navy)),
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: KiltoColors.zinc300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            KiltoText.h3('Editar información médica'),
             const SizedBox(height: 16),
-            _field(_blood, 'Tipo de sangre (p.ej. O+)'),
-            _field(_allergies, 'Alergias', maxLines: 2),
-            _field(_meds, 'Medicamentos', maxLines: 2),
-            _field(_conditions, 'Condiciones', maxLines: 2),
-            _field(_emergencyName, 'Contacto de emergencia'),
-            _field(_emergencyPhone, 'Tel. emergencia',
+            _field(_blood, 'TIPO DE SANGRE'),
+            _field(_allergies, 'ALERGIAS', maxLines: 2),
+            _field(_meds, 'MEDICAMENTOS', maxLines: 2),
+            _field(_conditions, 'CONDICIONES', maxLines: 2),
+            _field(_emergencyName, 'CONTACTO DE EMERGENCIA'),
+            _field(_emergencyPhone, 'TEL. EMERGENCIA',
                 keyboardType: TextInputType.phone),
             const SizedBox(height: 16),
             Row(
@@ -795,13 +679,11 @@ class _MedicalEditSheetState extends State<_MedicalEditSheet> {
                         allergies: _nullIfEmpty(_allergies.text),
                         medications: _nullIfEmpty(_meds.text),
                         conditions: _nullIfEmpty(_conditions.text),
-                        emergencyContactName: _nullIfEmpty(_emergencyName.text),
-                        emergencyContactPhone: _nullIfEmpty(_emergencyPhone.text),
+                        emergencyContactName:
+                            _nullIfEmpty(_emergencyName.text),
+                        emergencyContactPhone:
+                            _nullIfEmpty(_emergencyPhone.text),
                       ),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Theme.of(context).colorScheme.primary,
-                      foregroundColor: KiltoColors.white,
                     ),
                     child: const Text('Guardar'),
                   ),
@@ -818,16 +700,23 @@ class _MedicalEditSheetState extends State<_MedicalEditSheet> {
       {TextInputType? keyboardType, int maxLines = 1}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
-      child: TextField(
-        controller: c,
-        keyboardType: keyboardType,
-        maxLines: maxLines,
-        decoration: InputDecoration(
-          labelText: label,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          KiltoText.eyebrow(label),
+          const SizedBox(height: 6),
+          TextField(
+            controller: c,
+            keyboardType: keyboardType,
+            maxLines: maxLines,
+            style: const TextStyle(
+              fontFamily: KiltoFonts.familyBody,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: KiltoColors.zinc950,
+            ),
           ),
-        ),
+        ],
       ),
     );
   }

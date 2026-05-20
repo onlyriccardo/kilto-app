@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../../../../config/theme.dart';
-import '../../../../config/demo_mode.dart';
+import '../../../../config/clinic_theme.dart';
 import '../../../../config/demo_data.dart';
+import '../../../../config/demo_mode.dart';
+import '../../../../config/theme.dart';
 import '../../../../core/api/v1/models.dart';
 import '../../../../core/api/v1/v1_providers.dart';
+import '../../../../core/widgets/kilto_card.dart';
+import '../../../../core/widgets/kilto_empty_state.dart';
+import '../../../../core/widgets/kilto_text.dart';
 import '../../../../modules/dental/screens/odontogram_screen.dart';
 
 class DocumentsScreen extends ConsumerStatefulWidget {
@@ -34,39 +38,66 @@ class _DocumentsScreenState extends ConsumerState<DocumentsScreen>
 
   @override
   Widget build(BuildContext context) {
+    final accent =
+        Theme.of(context).extension<ClinicAccentExtension>()?.accent ??
+            KiltoColors.brandPrimary;
+
     return Scaffold(
-      backgroundColor: KiltoColors.grey,
-      appBar: AppBar(
-        title: const Text('Documentos'),
-        centerTitle: false,
-        bottom: TabBar(
-          controller: _tabController,
-          labelColor: KiltoColors.teal,
-          unselectedLabelColor: KiltoColors.greyText,
-          indicatorColor: KiltoColors.teal,
-          indicatorWeight: 3,
-          labelStyle: const TextStyle(
-            fontFamily: 'DMSans',
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
-          ),
-          tabs: const [
-            Tab(text: 'Odontograma'),
-            Tab(text: 'Archivos'),
+      backgroundColor: KiltoColors.bg,
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  KiltoText.label('Tu clínica'),
+                  const SizedBox(height: 2),
+                  KiltoText.h1('Documentos'),
+                ],
+              ),
+            ),
+            TabBar(
+              controller: _tabController,
+              labelColor: accent,
+              unselectedLabelColor: KiltoColors.zinc500,
+              indicatorColor: accent,
+              indicatorWeight: 2.5,
+              indicatorSize: TabBarIndicatorSize.label,
+              dividerColor: KiltoColors.border,
+              labelStyle: const TextStyle(
+                fontFamily: KiltoFonts.familyHeading,
+                fontWeight: FontWeight.w800,
+                fontSize: 13,
+                letterSpacing: -0.1,
+              ),
+              unselectedLabelStyle: const TextStyle(
+                fontFamily: KiltoFonts.familyHeading,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
+              tabs: const [
+                Tab(text: 'Odontograma'),
+                Tab(text: 'Archivos'),
+              ],
+            ),
+            Expanded(
+              child: TabBarView(
+                controller: _tabController,
+                children: [
+                  const OdontogramScreen(),
+                  kDemoMode ? _buildDemoFilesTab() : _buildRealFilesTab(),
+                ],
+              ),
+            ),
           ],
         ),
-      ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          const OdontogramScreen(),
-          kDemoMode ? _buildDemoFilesTab() : _buildRealFilesTab(),
-        ],
       ),
     );
   }
 
-  // ── Demo path (unchanged hardcoded data) ──────────────────────────
   Widget _buildDemoFilesTab() {
     final documents = DemoData.documents.map((d) {
       return DocumentItem(
@@ -87,7 +118,6 @@ class _DocumentsScreenState extends ConsumerState<DocumentsScreen>
     return _filesLayout(filters, filtered);
   }
 
-  // ── Real path ─────────────────────────────────────────────────────
   Widget _buildRealFilesTab() {
     final async = ref.watch(documentsProvider);
     return async.when(
@@ -108,121 +138,55 @@ class _DocumentsScreenState extends ConsumerState<DocumentsScreen>
   }
 
   Widget _filesLayout(List<String> filters, List<DocumentItem> filtered) {
+    final accent =
+        Theme.of(context).extension<ClinicAccentExtension>()?.accent ??
+            KiltoColors.brandPrimary;
+
     return Column(
       children: [
         SizedBox(
           height: 50,
-          child: ListView.builder(
+          child: ListView.separated(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
             itemCount: filters.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 6),
             itemBuilder: (_, i) {
               final f = filters[i];
               final sel = _selectedFilter == f;
-              return Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: FilterChip(
-                  label: Text(f),
-                  selected: sel,
-                  onSelected: (_) => setState(() => _selectedFilter = f),
-                  selectedColor: KiltoColors.teal.withOpacity(0.15),
-                  checkmarkColor: KiltoColors.teal,
-                  labelStyle: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: sel ? KiltoColors.teal : KiltoColors.greyText,
-                  ),
-                  side: BorderSide(
-                    color: sel ? KiltoColors.teal : KiltoColors.greyMid,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
+              return _FilterPill(
+                label: f,
+                selected: sel,
+                accent: accent,
+                onTap: () => setState(() => _selectedFilter = f),
               );
             },
           ),
         ),
         Expanded(
           child: filtered.isEmpty
-              ? _buildEmptyState()
-              : ListView.builder(
+              ? KiltoEmptyState(
+                  icon: Icons.folder_open_outlined,
+                  title: 'Sin documentos',
+                  subtitle:
+                      'No se encontraron documentos en esta categoría.',
+                )
+              : ListView.separated(
                   physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  padding:
+                      const EdgeInsets.fromLTRB(20, 10, 20, 24),
                   itemCount: filtered.length,
-                  itemBuilder: (_, i) => _buildDocumentCard(filtered[i]),
+                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  itemBuilder: (_, i) => _DocumentCard(
+                    doc: filtered[i],
+                    onOpen: () => filtered[i].downloadUrl != null
+                        ? _openUrl(filtered[i].downloadUrl!)
+                        : null,
+                  ),
                 ),
         ),
       ],
-    );
-  }
-
-  Widget _buildDocumentCard(DocumentItem doc) {
-    final icon = _iconForType(doc.type);
-    final color = _colorForType(doc.type);
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: KiltoColors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: KiltoColors.greyMid),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(icon, color: color, size: 22),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  doc.title,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: KiltoColors.navy,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '${doc.date} · ${doc.category}',
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: KiltoColors.greyText,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (doc.downloadUrl != null)
-            IconButton(
-              onPressed: () => _openUrl(doc.downloadUrl!),
-              icon: const Icon(Icons.visibility_outlined,
-                  size: 20, color: KiltoColors.greyText),
-              tooltip: 'Ver',
-              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-              padding: EdgeInsets.zero,
-            ),
-          if (doc.downloadUrl != null)
-            IconButton(
-              onPressed: () => _openUrl(doc.downloadUrl!),
-              icon: const Icon(Icons.download_outlined,
-                  size: 20, color: KiltoColors.greyText),
-              tooltip: 'Descargar',
-              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-              padding: EdgeInsets.zero,
-            ),
-        ],
-      ),
     );
   }
 
@@ -237,98 +201,130 @@ class _DocumentsScreenState extends ConsumerState<DocumentsScreen>
     }
   }
 
-  IconData _iconForType(String? type) {
-    switch (type) {
-      case 'xray':
-        return Icons.image_outlined;
-      case 'prescription':
-        return Icons.description_outlined;
-      case 'budget':
-        return Icons.article_outlined;
-      case 'consent':
-        return Icons.verified_outlined;
-      case 'invoice':
-        return Icons.receipt_outlined;
-      default:
-        if (type == null) return Icons.insert_drive_file_outlined;
-        if (type.contains('image')) return Icons.image_outlined;
-        if (type.contains('pdf')) return Icons.picture_as_pdf_outlined;
-        return Icons.insert_drive_file_outlined;
-    }
-  }
+  Widget _buildErrorState(String msg) => KiltoEmptyState(
+        icon: Icons.error_outline_rounded,
+        title: 'No se pudieron cargar los documentos',
+        subtitle: msg,
+        actionLabel: 'Reintentar',
+        onAction: () => ref.invalidate(documentsProvider),
+      );
+}
 
-  Color _colorForType(String? type) {
-    switch (type) {
-      case 'xray':
-        return KiltoColors.blue;
-      case 'prescription':
-        return KiltoColors.green;
-      case 'budget':
-        return KiltoColors.teal;
-      case 'consent':
-        return KiltoColors.yellow;
-      case 'invoice':
-        return KiltoColors.navy;
-      default:
-        return KiltoColors.teal;
-    }
-  }
+class _FilterPill extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final Color accent;
+  final VoidCallback onTap;
+  const _FilterPill({
+    required this.label,
+    required this.selected,
+    required this.accent,
+    required this.onTap,
+  });
 
-  Widget _buildEmptyState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.folder_open_outlined,
-              size: 64,
-              color: KiltoColors.greyText.withOpacity(0.4),
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(KiltoRadii.pill),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(KiltoRadii.pill),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+          decoration: BoxDecoration(
+            color: selected ? accent : KiltoColors.surface,
+            borderRadius: BorderRadius.circular(KiltoRadii.pill),
+            border: Border.all(
+              color: selected ? accent : KiltoColors.border,
+              width: 1,
             ),
-            const SizedBox(height: 16),
-            const Text(
-              'Sin documentos',
-              style: TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w600,
-                color: KiltoColors.navy,
-              ),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontFamily: KiltoFonts.familyHeading,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.1,
+              color: selected
+                  ? (accent.computeLuminance() > 0.55
+                      ? Colors.black
+                      : Colors.white)
+                  : KiltoColors.zinc700,
             ),
-            const SizedBox(height: 6),
-            const Text(
-              'No se encontraron documentos en esta categoría',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, color: KiltoColors.greyText),
-            ),
-          ],
+          ),
         ),
       ),
     );
   }
+}
 
-  Widget _buildErrorState(String msg) => Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.error_outline,
-                size: 48, color: KiltoColors.greyText),
-            const SizedBox(height: 12),
-            const Text('No se pudieron cargar los documentos',
-                style: TextStyle(
-                    fontSize: 15, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 6),
-            Text(msg,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    fontSize: 12, color: KiltoColors.greyText)),
-            const SizedBox(height: 16),
-            OutlinedButton(
-              onPressed: () => ref.invalidate(documentsProvider),
-              child: const Text('Reintentar'),
+class _DocumentCard extends StatelessWidget {
+  final DocumentItem doc;
+  final VoidCallback? onOpen;
+  const _DocumentCard({required this.doc, this.onOpen});
+
+  @override
+  Widget build(BuildContext context) {
+    final (icon, tint) = _visualForType(doc.type);
+
+    return KiltoCard(
+      onTap: onOpen,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: tint.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(KiltoRadii.xsmall),
             ),
-          ],
-        ),
-      );
+            child: Icon(icon, color: tint, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                KiltoText.strong(doc.title, size: 13.5),
+                const SizedBox(height: 2),
+                KiltoText.label('${doc.date} · ${doc.category}'),
+              ],
+            ),
+          ),
+          if (doc.downloadUrl != null)
+            const Icon(Icons.download_rounded,
+                size: 18, color: KiltoColors.zinc500),
+        ],
+      ),
+    );
+  }
+
+  static (IconData, Color) _visualForType(String? type) {
+    switch (type) {
+      case 'xray':
+        return (Icons.image_outlined, KiltoColors.info);
+      case 'prescription':
+        return (Icons.description_outlined, KiltoColors.success);
+      case 'budget':
+        return (Icons.article_outlined, KiltoColors.violet);
+      case 'consent':
+        return (Icons.verified_outlined, KiltoColors.warning);
+      case 'invoice':
+        return (Icons.receipt_outlined, KiltoColors.zinc700);
+      default:
+        if (type == null) {
+          return (Icons.insert_drive_file_outlined, KiltoColors.zinc500);
+        }
+        if (type.contains('image')) {
+          return (Icons.image_outlined, KiltoColors.info);
+        }
+        if (type.contains('pdf')) {
+          return (Icons.picture_as_pdf_outlined, KiltoColors.error);
+        }
+        return (Icons.insert_drive_file_outlined, KiltoColors.zinc500);
+    }
+  }
 }

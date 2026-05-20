@@ -95,12 +95,27 @@ class AccountNotifier extends StateNotifier<AccountState> {
     _ref.read(authStateProvider.notifier).logout();
     state = const AccountState(bootstrapped: true);
   }
+
+  /// Permanently deletes the Kilto account on the server and clears local
+  /// state — same teardown as [logout] once the server confirms.
+  Future<void> deleteAccount() async {
+    await _ref.read(accountAuthServiceProvider).deleteAccount();
+    _ref.read(tenantSessionProvider.notifier).clear();
+    _ref.read(authStateProvider.notifier).logout();
+    state = const AccountState(bootstrapped: true);
+  }
 }
 
 final accountProvider =
     StateNotifierProvider<AccountNotifier, AccountState>(
   (ref) => AccountNotifier(ref),
 );
+
+/// Monotonically-incremented counter that screens like MyClinics watch to
+/// know when to re-fetch their `/v2/clinics` list (e.g. after joining a
+/// clinic via the install-code flow). `ref.read(...notifier).state++` to
+/// bump; the listener does the work.
+final clinicsListVersionProvider = StateProvider<int>((_) => 0);
 
 // =======================================================================
 // Tenant session state (mirror of what we're "inside")

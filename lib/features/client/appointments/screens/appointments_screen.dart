@@ -1,17 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../../../config/theme.dart';
-import '../../../../config/demo_mode.dart';
+import '../../../../config/clinic_theme.dart';
 import '../../../../config/demo_data.dart';
+import '../../../../config/demo_mode.dart';
+import '../../../../config/theme.dart';
 import '../../../../core/api/v1/models.dart';
 import '../../../../core/api/v1/v1_providers.dart';
+import '../../../../core/widgets/kilto_card.dart';
+import '../../../../core/widgets/kilto_date_badge.dart';
+import '../../../../core/widgets/kilto_empty_state.dart';
+import '../../../../core/widgets/kilto_text.dart';
 
 class AppointmentsScreen extends ConsumerStatefulWidget {
   const AppointmentsScreen({super.key});
 
   @override
-  ConsumerState<AppointmentsScreen> createState() => _AppointmentsScreenState();
+  ConsumerState<AppointmentsScreen> createState() =>
+      _AppointmentsScreenState();
 }
 
 class _AppointmentsScreenState extends ConsumerState<AppointmentsScreen>
@@ -32,83 +38,95 @@ class _AppointmentsScreenState extends ConsumerState<AppointmentsScreen>
 
   @override
   Widget build(BuildContext context) {
+    final accent =
+        Theme.of(context).extension<ClinicAccentExtension>()?.accent ??
+            KiltoColors.brandPrimary;
+
     return Scaffold(
-      backgroundColor: KiltoColors.grey,
-      appBar: AppBar(
-        title: const Text('Mis citas'),
-        centerTitle: false,
-        bottom: TabBar(
-          controller: _tabController,
-          labelColor: KiltoColors.teal,
-          unselectedLabelColor: KiltoColors.greyText,
-          indicatorColor: KiltoColors.teal,
-          indicatorWeight: 3,
-          labelStyle: const TextStyle(
-            fontFamily: 'DMSans',
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
-          ),
-          tabs: const [
-            Tab(text: 'Próximas'),
-            Tab(text: 'Pasadas'),
+      backgroundColor: KiltoColors.bg,
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  KiltoText.label('Mis citas'),
+                  const SizedBox(height: 2),
+                  KiltoText.h1('Historial'),
+                ],
+              ),
+            ),
+            TabBar(
+              controller: _tabController,
+              labelColor: accent,
+              unselectedLabelColor: KiltoColors.zinc500,
+              indicatorColor: accent,
+              indicatorWeight: 2.5,
+              indicatorSize: TabBarIndicatorSize.label,
+              dividerColor: KiltoColors.border,
+              labelStyle: const TextStyle(
+                fontFamily: KiltoFonts.familyHeading,
+                fontWeight: FontWeight.w800,
+                fontSize: 13,
+                letterSpacing: -0.1,
+              ),
+              unselectedLabelStyle: const TextStyle(
+                fontFamily: KiltoFonts.familyHeading,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
+              tabs: const [
+                Tab(text: 'Próximas'),
+                Tab(text: 'Pasadas'),
+              ],
+            ),
+            Expanded(
+              child: kDemoMode ? _buildDemoBody() : _buildRealBody(),
+            ),
           ],
         ),
       ),
-      body: kDemoMode ? _buildDemoBody() : _buildRealBody(),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => context.push('/client/book-appointment'),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: KiltoColors.white,
-        icon: const Icon(Icons.add),
+        backgroundColor: accent,
+        foregroundColor:
+            accent.computeLuminance() > 0.55 ? Colors.black : Colors.white,
+        icon: const Icon(Icons.add_rounded, size: 18),
         label: const Text(
           'Nueva cita',
-          style: TextStyle(fontWeight: FontWeight.w600),
+          style: TextStyle(
+            fontFamily: KiltoFonts.familyHeading,
+            fontWeight: FontWeight.w800,
+            fontSize: 13,
+            letterSpacing: -0.1,
+          ),
         ),
       ),
     );
   }
 
+  // ── Demo path (kDemoMode=true) ────────────────────────────────────
   Widget _buildDemoBody() {
     final upcoming = DemoData.upcomingAppointments
-        .map((apt) => _DemoTile(
-              date: apt['date'] as String,
-              time: apt['time'] as String,
-              service: apt['service'] as String,
-              doctor: apt['doctor'] as String,
-            ))
+        .map((apt) => _Item.fromMap(apt))
         .toList();
     final past = DemoData.pastAppointments
-        .map((apt) => _DemoTile(
-              date: apt['date'] as String,
-              time: apt['time'] as String,
-              service: apt['service'] as String,
-              doctor: apt['doctor'] as String,
-            ))
+        .map((apt) => _Item.fromMap(apt))
         .toList();
 
     return TabBarView(
       controller: _tabController,
       children: [
-        _listOrEmpty(
-          upcoming,
-          empty: _buildEmptyState(
-            'No tienes citas próximas',
-            'Agenda tu primera cita con el botón de abajo',
-          ),
-          builder: (t) => _buildDemoCard(t, isUpcoming: true),
-        ),
-        _listOrEmpty(
-          past,
-          empty: _buildEmptyState(
-            'Sin historial de citas',
-            'Aquí aparecerán tus citas pasadas',
-          ),
-          builder: (t) => _buildDemoCard(t, isUpcoming: false),
-        ),
+        _list(upcoming, isUpcoming: true),
+        _list(past, isUpcoming: false),
       ],
     );
   }
 
+  // ── Real API path ─────────────────────────────────────────────────
   Widget _buildRealBody() {
     final asyncData = ref.watch(appointmentsProvider);
     return asyncData.when(
@@ -119,24 +137,23 @@ class _AppointmentsScreenState extends ConsumerState<AppointmentsScreen>
         children: [
           RefreshIndicator(
             onRefresh: () async => ref.invalidate(appointmentsProvider),
-            child: _listOrEmpty(
-              res.upcoming,
-              empty: _buildEmptyState(
-                'No tienes citas próximas',
-                'Agenda tu primera cita con el botón de abajo',
+            child: _list(
+              res.upcoming.map(_Item.fromAppointment).toList(),
+              isUpcoming: true,
+              actions: (item) => _UpcomingActions(
+                onReschedule: () => _onReschedule(item.appointment!),
+                onCancel: () => _onCancel(item.appointment!),
               ),
-              builder: (a) => _buildRealCard(a, isUpcoming: true),
             ),
           ),
           RefreshIndicator(
             onRefresh: () async => ref.invalidate(appointmentsProvider),
-            child: _listOrEmpty(
-              res.past,
-              empty: _buildEmptyState(
-                'Sin historial de citas',
-                'Aquí aparecerán tus citas pasadas',
+            child: _list(
+              res.past.map(_Item.fromAppointment).toList(),
+              isUpcoming: false,
+              actions: (item) => _PastActions(
+                onDetails: () => _showDetails(item.appointment!),
               ),
-              builder: (a) => _buildRealCard(a, isUpcoming: false),
             ),
           ),
         ],
@@ -144,157 +161,44 @@ class _AppointmentsScreenState extends ConsumerState<AppointmentsScreen>
     );
   }
 
-  Widget _listOrEmpty<T>(
-    List<T> items, {
-    required Widget empty,
-    required Widget Function(T) builder,
+  Widget _list(
+    List<_Item> items, {
+    required bool isUpcoming,
+    Widget Function(_Item)? actions,
   }) {
     if (items.isEmpty) {
       return ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        children: [SizedBox(height: 120), empty],
+        padding: const EdgeInsets.only(top: 80),
+        children: [
+          KiltoEmptyState(
+            icon: isUpcoming
+                ? Icons.calendar_today_outlined
+                : Icons.history_rounded,
+            title: isUpcoming
+                ? 'No tienes citas próximas'
+                : 'Sin historial de citas',
+            subtitle: isUpcoming
+                ? 'Agenda tu primera cita con el botón de abajo.'
+                : 'Aquí aparecerán tus citas pasadas.',
+          ),
+        ],
       );
     }
-    return ListView.builder(
+
+    return ListView.separated(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 96),
       itemCount: items.length,
-      itemBuilder: (_, i) => builder(items[i]),
-    );
-  }
-
-  // ── Real API card ──────────────────────────────────────────────────
-  Widget _buildRealCard(Appointment apt, {required bool isUpcoming}) {
-    final statusBg = _statusBg(apt.status);
-    final statusColor = _statusColor(apt.status);
-    final statusLabel = _statusLabel(apt.status);
-    final doctorName = apt.staffName ?? 'Profesional';
-    final doctorInitial = doctorName.isNotEmpty ? doctorName[0] : '?';
-
-    return _cardContainer(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _headerRow(
-            dateLabel: _formatDateLabel(apt.date),
-            statusLabel: statusLabel,
-            statusBg: statusBg,
-            statusColor: statusColor,
-          ),
-          const SizedBox(height: 10),
-          _iconRow(Icons.access_time, apt.time),
-          const SizedBox(height: 6),
-          Text(
-            apt.service,
-            style: const TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              color: KiltoColors.navy,
-            ),
-          ),
-          const SizedBox(height: 4),
-          _doctorRow(doctorInitial, doctorName),
-          const SizedBox(height: 14),
-          if (isUpcoming)
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => _onReschedule(apt),
-                    style: _neutralOutlined(),
-                    child: const Text('Reagendar',
-                        style: TextStyle(
-                            fontSize: 13, fontWeight: FontWeight.w600)),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => _onCancel(apt),
-                    style: _dangerOutlined(),
-                    child: const Text('Cancelar',
-                        style: TextStyle(
-                            fontSize: 13, fontWeight: FontWeight.w600)),
-                  ),
-                ),
-              ],
-            )
-          else
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton(
-                onPressed: () => _showDetails(apt),
-                style: _neutralOutlined(),
-                child: const Text('Ver detalles',
-                    style:
-                        TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  // ── Demo card (legacy code path, unchanged behavior) ──────────────
-  Widget _buildDemoCard(_DemoTile t, {required bool isUpcoming}) {
-    return _cardContainer(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _headerRow(
-            dateLabel: t.date,
-            statusLabel: isUpcoming ? 'Confirmada' : 'Completada',
-            statusBg: isUpcoming ? KiltoColors.greenLight : KiltoColors.blueLight,
-            statusColor: isUpcoming ? KiltoColors.green : KiltoColors.blue,
-          ),
-          const SizedBox(height: 10),
-          _iconRow(Icons.access_time, t.time),
-          const SizedBox(height: 6),
-          Text(t.service,
-              style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: KiltoColors.navy)),
-          const SizedBox(height: 4),
-          _doctorRow(t.doctor.split(' ').last[0], t.doctor),
-          const SizedBox(height: 14),
-          if (isUpcoming)
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () {},
-                    style: _neutralOutlined(),
-                    child: const Text('Reagendar',
-                        style: TextStyle(
-                            fontSize: 13, fontWeight: FontWeight.w600)),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () {},
-                    style: _dangerOutlined(),
-                    child: const Text('Cancelar',
-                        style: TextStyle(
-                            fontSize: 13, fontWeight: FontWeight.w600)),
-                  ),
-                ),
-              ],
-            )
-          else
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton(
-                onPressed: () {},
-                style: _neutralOutlined(),
-                child: const Text('Ver detalles',
-                    style:
-                        TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-              ),
-            ),
-        ],
-      ),
+      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      itemBuilder: (_, i) {
+        final it = items[i];
+        return _AppointmentCard(
+          item: it,
+          isUpcoming: isUpcoming,
+          trailing: actions?.call(it),
+        );
+      },
     );
   }
 
@@ -314,7 +218,7 @@ class _AppointmentsScreenState extends ConsumerState<AppointmentsScreen>
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Sí, cancelar',
-                style: TextStyle(color: KiltoColors.red)),
+                style: TextStyle(color: KiltoColors.error)),
           ),
         ],
       ),
@@ -335,8 +239,9 @@ class _AppointmentsScreenState extends ConsumerState<AppointmentsScreen>
     final initial = DateTime.tryParse(apt.date) ?? DateTime.now();
     final date = await showDatePicker(
       context: context,
-      initialDate:
-          initial.isAfter(DateTime.now()) ? initial : DateTime.now().add(const Duration(days: 1)),
+      initialDate: initial.isAfter(DateTime.now())
+          ? initial
+          : DateTime.now().add(const Duration(days: 1)),
       firstDate: DateTime.now().add(const Duration(days: 1)),
       lastDate: DateTime.now().add(const Duration(days: 180)),
     );
@@ -375,22 +280,33 @@ class _AppointmentsScreenState extends ConsumerState<AppointmentsScreen>
   void _showDetails(Appointment apt) {
     showModalBottomSheet(
       context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(KiltoRadii.xlarge)),
+      ),
       builder: (_) => Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(apt.service,
-                style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: KiltoColors.navy)),
-            const SizedBox(height: 12),
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 14),
+                decoration: BoxDecoration(
+                  color: KiltoColors.zinc300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            KiltoText.h3(apt.service),
+            const SizedBox(height: 14),
             _detailRow('Fecha', _formatDateLabel(apt.date)),
             _detailRow('Hora', apt.time),
             _detailRow('Duración', '${apt.duration} min'),
-            if (apt.staffName != null) _detailRow('Profesional', apt.staffName!),
+            if (apt.staffName != null && apt.staffName!.isNotEmpty)
+              _detailRow('Profesional', apt.staffName!),
             _detailRow('Estado', _statusLabel(apt.status)),
             if (apt.notes != null && apt.notes!.isNotEmpty)
               _detailRow('Notas', apt.notes!),
@@ -401,137 +317,15 @@ class _AppointmentsScreenState extends ConsumerState<AppointmentsScreen>
   }
 
   Widget _detailRow(String label, String value) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(vertical: 6),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(
-              width: 110,
-              child: Text(label,
-                  style: const TextStyle(
-                      fontSize: 13, color: KiltoColors.greyText)),
-            ),
-            Expanded(
-                child: Text(value,
-                    style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: KiltoColors.navy))),
+            SizedBox(width: 110, child: KiltoText.label(label)),
+            Expanded(child: KiltoText.body(value, color: KiltoColors.zinc950)),
           ],
         ),
       );
-
-  // ── Shared visual helpers ─────────────────────────────────────────
-  Widget _cardContainer({required Widget child}) => Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: KiltoColors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: KiltoColors.greyMid),
-        ),
-        child: child,
-      );
-
-  Widget _headerRow({
-    required String dateLabel,
-    required String statusLabel,
-    required Color statusBg,
-    required Color statusColor,
-  }) =>
-      Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(
-            child: Text(dateLabel,
-                style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: KiltoColors.navy)),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: statusBg,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(statusLabel,
-                style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: statusColor)),
-          ),
-        ],
-      );
-
-  Widget _iconRow(IconData icon, String text) => Row(
-        children: [
-          Icon(icon, size: 15, color: KiltoColors.greyText),
-          const SizedBox(width: 6),
-          Text(text,
-              style: const TextStyle(
-                  fontSize: 13, color: KiltoColors.greyText)),
-        ],
-      );
-
-  Widget _doctorRow(String initial, String name) => Row(
-        children: [
-          CircleAvatar(
-            radius: 12,
-            backgroundColor: KiltoColors.teal.withOpacity(0.15),
-            child: Text(initial,
-                style: const TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    color: KiltoColors.teal)),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(name,
-                style: const TextStyle(
-                    fontSize: 13, color: KiltoColors.greyText)),
-          ),
-        ],
-      );
-
-  ButtonStyle _neutralOutlined() => OutlinedButton.styleFrom(
-        foregroundColor: KiltoColors.navy,
-        side: const BorderSide(color: KiltoColors.greyMid),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        padding: const EdgeInsets.symmetric(vertical: 10),
-      );
-
-  ButtonStyle _dangerOutlined() => OutlinedButton.styleFrom(
-        foregroundColor: KiltoColors.red,
-        side: const BorderSide(color: KiltoColors.redLight),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        padding: const EdgeInsets.symmetric(vertical: 10),
-      );
-
-  Color _statusBg(String status) {
-    switch (status) {
-      case 'completed':
-        return KiltoColors.blueLight;
-      case 'cancelled':
-      case 'no_show':
-        return KiltoColors.redLight;
-      case 'scheduled':
-      default:
-        return KiltoColors.greenLight;
-    }
-  }
-
-  Color _statusColor(String status) {
-    switch (status) {
-      case 'completed':
-        return KiltoColors.blue;
-      case 'cancelled':
-      case 'no_show':
-        return KiltoColors.red;
-      case 'scheduled':
-      default:
-        return KiltoColors.green;
-    }
-  }
 
   String _statusLabel(String status) {
     switch (status) {
@@ -548,7 +342,7 @@ class _AppointmentsScreenState extends ConsumerState<AppointmentsScreen>
     }
   }
 
-  /// Turns `2026-04-23` into `Jue, 23 Abr 2026` (best-effort).
+  /// Turns `2026-04-23` into `Jue, 23 Abr 2026`.
   String _formatDateLabel(String iso) {
     final d = DateTime.tryParse(iso);
     if (d == null) return iso;
@@ -560,75 +354,238 @@ class _AppointmentsScreenState extends ConsumerState<AppointmentsScreen>
     return '${weekdays[d.weekday - 1]}, ${d.day} ${months[d.month - 1]} ${d.year}';
   }
 
-  Widget _buildEmptyState(String title, String subtitle) {
-    return Padding(
-      padding: const EdgeInsets.all(32),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.calendar_today_outlined,
-            size: 64,
-            color: KiltoColors.greyText.withOpacity(0.4),
+  Widget _buildErrorState(String msg) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.error_outline,
+                  size: 40, color: KiltoColors.zinc400),
+              const SizedBox(height: 12),
+              KiltoText.h3('No se pudieron cargar las citas'),
+              const SizedBox(height: 6),
+              KiltoText.body(msg,
+                  align: TextAlign.center, color: KiltoColors.zinc500),
+              const SizedBox(height: 18),
+              OutlinedButton(
+                onPressed: () => ref.invalidate(appointmentsProvider),
+                child: const Text('Reintentar'),
+              ),
+            ],
           ),
-          const SizedBox(height: 16),
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w600,
-              color: KiltoColors.navy,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            subtitle,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 13,
-              color: KiltoColors.greyText,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildErrorState(String msg) => Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.error_outline,
-                size: 48, color: KiltoColors.greyText),
-            const SizedBox(height: 12),
-            const Text('No se pudieron cargar las citas',
-                style: TextStyle(
-                    fontSize: 15, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 6),
-            Text(msg,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    fontSize: 12, color: KiltoColors.greyText)),
-            const SizedBox(height: 16),
-            OutlinedButton(
-              onPressed: () => ref.invalidate(appointmentsProvider),
-              child: const Text('Reintentar'),
-            ),
-          ],
         ),
       );
 }
 
-class _DemoTile {
-  final String date;
+/// Internal view-model that both real-API and demo paths feed into.
+class _Item {
+  final DateTime date;
+  final String dateLabel;
   final String time;
   final String service;
-  final String doctor;
-  const _DemoTile({
+  final String? staffName;
+  final String status;
+  final Appointment? appointment;
+
+  _Item({
     required this.date,
+    required this.dateLabel,
     required this.time,
     required this.service,
-    required this.doctor,
+    required this.staffName,
+    required this.status,
+    this.appointment,
   });
+
+  factory _Item.fromAppointment(Appointment apt) {
+    final d = DateTime.tryParse(apt.date) ?? DateTime.now();
+    return _Item(
+      date: d,
+      dateLabel: _formatLabel(d),
+      time: apt.time,
+      service: apt.service,
+      staffName: apt.staffName,
+      status: apt.status,
+      appointment: apt,
+    );
+  }
+
+  factory _Item.fromMap(Map<String, dynamic> m) {
+    final d = DateTime.tryParse(m['date'] as String? ?? '') ?? DateTime.now();
+    return _Item(
+      date: d,
+      dateLabel: _formatLabel(d),
+      time: m['time'] as String? ?? '',
+      service: m['service'] as String? ?? '',
+      staffName: m['doctor'] as String?,
+      status: 'scheduled',
+    );
+  }
+
+  static String _formatLabel(DateTime d) {
+    const weekdays = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+    return '${weekdays[d.weekday - 1]}, ${d.day}';
+  }
+}
+
+class _AppointmentCard extends StatelessWidget {
+  final _Item item;
+  final bool isUpcoming;
+  final Widget? trailing;
+  const _AppointmentCard({
+    required this.item,
+    required this.isUpcoming,
+    this.trailing,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return KiltoCard(
+      onTap: () {},
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              KiltoDateBadge(date: item.date),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: KiltoText.strong(item.service, size: 14),
+                        ),
+                        const SizedBox(width: 8),
+                        _StatusPill(status: item.status),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    KiltoText.label(
+                      '${item.time}${item.staffName != null && item.staffName!.isNotEmpty ? ' · ${item.staffName}' : ''}',
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (trailing != null) ...[
+            const SizedBox(height: 12),
+            trailing!,
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _StatusPill extends StatelessWidget {
+  final String status;
+  const _StatusPill({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, fg, bg) = switch (status) {
+      'completed' => ('Completada', KiltoColors.info, KiltoColors.infoLight),
+      'cancelled' || 'no_show' => (
+          status == 'no_show' ? 'No asistió' : 'Cancelada',
+          KiltoColors.error,
+          KiltoColors.errorLight,
+        ),
+      _ => ('Confirmada', KiltoColors.success, KiltoColors.successLight),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(KiltoRadii.pill),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontFamily: KiltoFonts.familyHeading,
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.3,
+          color: fg,
+        ),
+      ),
+    );
+  }
+}
+
+class _UpcomingActions extends StatelessWidget {
+  final VoidCallback onReschedule;
+  final VoidCallback onCancel;
+  const _UpcomingActions({required this.onReschedule, required this.onCancel});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton(
+            onPressed: onReschedule,
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              textStyle: const TextStyle(
+                fontFamily: KiltoFonts.familyHeading,
+                fontWeight: FontWeight.w700,
+                fontSize: 12.5,
+              ),
+            ),
+            child: const Text('Reagendar'),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: OutlinedButton(
+            onPressed: onCancel,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: KiltoColors.error,
+              side: const BorderSide(color: KiltoColors.errorLight, width: 1.5),
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              textStyle: const TextStyle(
+                fontFamily: KiltoFonts.familyHeading,
+                fontWeight: FontWeight.w700,
+                fontSize: 12.5,
+              ),
+            ),
+            child: const Text('Cancelar'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PastActions extends StatelessWidget {
+  final VoidCallback onDetails;
+  const _PastActions({required this.onDetails});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton(
+        onPressed: onDetails,
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          textStyle: const TextStyle(
+            fontFamily: KiltoFonts.familyHeading,
+            fontWeight: FontWeight.w700,
+            fontSize: 12.5,
+          ),
+        ),
+        child: const Text('Ver detalles'),
+      ),
+    );
+  }
 }

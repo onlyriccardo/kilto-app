@@ -1,7 +1,7 @@
 name: kilto
 description: "Kilto — CRM mobile app. Client booking, staff management, vertical modules."
 publish_to: 'none'
-version: 1.0.0+2
+version: 1.0.0+4
 
 environment:
   sdk: ^3.6.2
@@ -58,16 +58,28 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^5.0.0
   flutter_launcher_icons: ^0.14.1
+  flutter_native_splash: ^2.4.3
 
 flutter_launcher_icons:
   android: true
   ios: true
   image_path: "assets/brand/kilto-favicon.png"
   min_sdk_android: 21
-  # Android 13+ adaptive icon: neutral white background, icon foreground.
-  adaptive_icon_background: "#FFFFFF"
+  # Black background matches the K° rounded-square brand mark.
+  adaptive_icon_background: "#000000"
   adaptive_icon_foreground: "assets/brand/kilto-favicon.png"
   remove_alpha_ios: true
+
+flutter_native_splash:
+  # Black canvas with the K° mark centered — matches the modernized splash.
+  color: "#000000"
+  image: "assets/brand/kilto-favicon.png"
+  android_12:
+    color: "#000000"
+    image: "assets/brand/kilto-favicon.png"
+  android: true
+  ios: true
+  fullscreen: true
 
 flutter:
   uses-material-design: true
@@ -82,6 +94,11 @@ flutter:
           weight: 600
         - asset: assets/fonts/DMSans-Bold.ttf
           weight: 700
+    # Outfit ships as a single variable font (wght axis 100..900).
+    # Flutter picks the right axis position based on the requested FontWeight.
+    - family: Outfit
+      fonts:
+        - asset: assets/fonts/Outfit-Variable.ttf
 
   assets:
     - assets/images/

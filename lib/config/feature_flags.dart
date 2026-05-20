@@ -10,8 +10,16 @@
 /// /api/v1/auth/login with a tenant-slug field.
 ///
 /// Build:
-///   flutter run --dart-define=CENTRAL_AUTH=true
+///   flutter run --dart-define=CENTRAL_AUTH=false   // opt out
 const bool kCentralAuth = bool.fromEnvironment(
   'CENTRAL_AUTH',
+  defaultValue: true,
+);
+
+/// Gates the client-side chat surface (the "Contactar" tile on the home
+/// screen and the /client/chat route). Off by default until the backend
+/// exposes /v1/conversations(/:id)(/messages) for the patient role.
+const bool kClientChatEnabled = bool.fromEnvironment(
+  'CLIENT_CHAT',
   defaultValue: false,
 );

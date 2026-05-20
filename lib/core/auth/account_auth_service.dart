@@ -49,6 +49,15 @@ class AccountAuthService {
     await storage.clearAll();
   }
 
+  /// Permanently delete the Kilto account. Required by Apple Guideline
+  /// 5.1.1(v) for any app that lets users register. Backend should soft- or
+  /// hard-delete the account, revoke all tokens, and remove every tenant
+  /// membership before responding 204.
+  Future<void> deleteAccount() async {
+    await api.delete('/v2/account');
+    await storage.clearAll();
+  }
+
   Future<Account?> me() async {
     final token = await storage.getAccountToken();
     if (token == null) return null;
